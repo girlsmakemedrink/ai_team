@@ -124,8 +124,13 @@ class ClaudeCodeHeadlessClient:
             else:
                 cmd += ["--session-id", session_id]
                 self._claimed_sessions.add(session_id)
-        if mcp_config_path:
-            cmd += ["--mcp-config", mcp_config_path]
+        # When mcp_config_path isn't passed explicitly, fall back to the
+        # AI_TEAM_MCP_CONFIG_PATH env var so the demo script can plumb in
+        # the MCP servers without changing per-agent code. The env var is
+        # the iter-2 wiring; per-agent config files are iter-2b material.
+        effective_mcp = mcp_config_path or os.environ.get("AI_TEAM_MCP_CONFIG_PATH")
+        if effective_mcp:
+            cmd += ["--mcp-config", effective_mcp]
         if json_schema is not None:
             cmd += ["--json-schema", json.dumps(json_schema, separators=(",", ":"))]
 

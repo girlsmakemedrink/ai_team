@@ -28,7 +28,10 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sse_starlette.sse import EventSourceResponse
 
+from agents.architect import ArchitectAgent
+from agents.backend_developer import BackendDeveloperAgent
 from agents.product_manager import ProductManagerAgent
+from agents.qa_engineer import QAEngineerAgent
 from agents.team_lead import TeamLeadAgent
 from core.audit.writer import AuditLogWriter
 from core.config import Settings, get_settings
@@ -74,6 +77,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     agents = {
         AgentId.TEAM_LEAD: TeamLeadAgent(llm=llm),
         AgentId.PRODUCT_MANAGER: ProductManagerAgent(llm=llm),
+        AgentId.ARCHITECT: ArchitectAgent(llm=llm),
+        AgentId.BACKEND_DEVELOPER: BackendDeveloperAgent(llm=llm),
+        AgentId.QA_ENGINEER: QAEngineerAgent(llm=llm),
     }
     dispatcher = AgentDispatcher(
         bus=bus,
@@ -81,7 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         audit=audit,
         signer=signer,
         agents=agents,
-        iteration=1,
+        iteration=2,
     )
 
     # Disable in unit tests where no Redis is available. The integration
