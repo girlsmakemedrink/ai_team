@@ -24,7 +24,10 @@ make lint
 echo "[pre-push] ruff format --check"
 uv run ruff format --check .
 
-echo "[pre-push] make test (unit + mocked-LLM integration)"
-make test
+echo "[pre-push] make test-unit"
+# Integration tests need infra (testcontainers / docker) and are too
+# heavy for a per-push hook — CI runs them. Unit tests are fast and
+# infra-free; that's enough local pre-push protection.
+make test-unit
 
 echo "[pre-push] OK — pushing"
