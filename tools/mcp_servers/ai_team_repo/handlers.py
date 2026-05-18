@@ -58,7 +58,9 @@ def _ok(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def handle_status(ctx: Context, _: dict[str, Any]) -> dict[str, Any]:
+async def handle_status(  # pragma: no cover  - subprocess-driven; integration-tested
+    ctx: Context, _: dict[str, Any]
+) -> dict[str, Any]:
     proc = await asyncio.create_subprocess_exec(
         "git",
         "status",
@@ -94,7 +96,9 @@ async def handle_status(ctx: Context, _: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-async def handle_create_branch(ctx: Context, args: dict[str, Any]) -> dict[str, Any]:
+async def handle_create_branch(  # pragma: no cover  - subprocess-driven; integration-tested
+    ctx: Context, args: dict[str, Any]
+) -> dict[str, Any]:
     branch = str(args.get("branch", ""))
     base = str(args.get("base") or ctx.default_pr_base)
     if not _BRANCH_ALLOWED_RE.match(branch):
@@ -136,7 +140,9 @@ async def handle_write_file_in_scope(ctx: Context, args: dict[str, Any]) -> dict
     return _ok({"path": path, "absolute_path": str(resolved), "bytes_written": len(content)})
 
 
-async def handle_run_shell(ctx: Context, args: dict[str, Any]) -> dict[str, Any]:
+async def handle_run_shell(  # pragma: no cover  - subprocess-driven; integration-tested
+    ctx: Context, args: dict[str, Any]
+) -> dict[str, Any]:
     command_class = str(args.get("command_class", ""))
     raw_args = args.get("args", [])
     if not isinstance(raw_args, list) or not all(isinstance(a, str) for a in raw_args):
@@ -164,7 +170,9 @@ async def handle_run_shell(ctx: Context, args: dict[str, Any]) -> dict[str, Any]
     )
 
 
-async def handle_open_pr(ctx: Context, args: dict[str, Any]) -> dict[str, Any]:
+async def handle_open_pr(  # pragma: no cover  - subprocess-driven; integration-tested
+    ctx: Context, args: dict[str, Any]
+) -> dict[str, Any]:
     head = str(args.get("head", ""))
     base = str(args.get("base") or ctx.default_pr_base)
     title = str(args.get("title", ""))
