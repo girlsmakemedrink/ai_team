@@ -65,8 +65,8 @@ fix: ## Auto-fix lint + format
 	uv run ruff check --fix .
 	uv run ruff format .
 
-sec: ## Bandit security scan
-	uv run bandit -c pyproject.toml -r apps agents core tools
+sec: ## Bandit security scan (gates on high-severity per ADR-005)
+	uv run bandit -c pyproject.toml -r apps agents core tools --severity-level high
 
 # === Migrations ===
 

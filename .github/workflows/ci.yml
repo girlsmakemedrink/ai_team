@@ -67,8 +67,8 @@ jobs:
       - name: Mypy
         run: uv run mypy .
 
-      - name: Bandit
-        run: uv run bandit -c pyproject.toml -r apps agents core tools
+      - name: Bandit (gate on high-severity only, per ADR-005)
+        run: uv run bandit -c pyproject.toml -r apps agents core tools --severity-level high
 
       - name: Pytest (mocked LLM only)
         run: uv run pytest --cov --cov-report=xml --cov-report=term -m "not real_llm"
