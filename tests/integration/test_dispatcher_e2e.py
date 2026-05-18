@@ -212,9 +212,7 @@ async def test_user_to_tl_to_pm_to_report(
                 feed_rows = list(
                     (
                         await session.execute(
-                            select(FeedEvent).where(
-                                FeedEvent.correlation_id == correlation_id
-                            )
+                            select(FeedEvent).where(FeedEvent.correlation_id == correlation_id)
                         )
                     )
                     .scalars()
