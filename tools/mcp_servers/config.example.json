@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ai-team-bus": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "tools.mcp_servers.ai_team_bus"]
+    },
+    "ai-team-tasks": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "tools.mcp_servers.ai_team_tasks"]
+    }
+  }
+}
