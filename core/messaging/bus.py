@@ -124,7 +124,7 @@ class MessageBus:
             return None
         try:
             return AgentMessage.model_validate_json(raw)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             _log.warning("bus.consume.invalid_msg", entry_id=eid, error=str(e))
             await self._redis.xadd(DLQ_STREAM, {"raw": raw, "reason": str(e)})
             await self._redis.xack(stream, group, eid)  # type: ignore[no-untyped-call]
