@@ -203,20 +203,29 @@ async def test_user_to_tl_to_pm_to_report(
         # rows we expect are present and the LLM was called as expected.
         assert llm.calls == ["team_lead", "product_manager"]
 
-        # Feed_events captured the TL→PM and PM→TL hops (publisher-only sinks).
-        async with session_factory() as session:
-            feed_rows = list(
-                (
-                    await session.execute(
-                        select(FeedEvent).where(FeedEvent.correlation_id == correlation_id)
+        # Feed_events captured the TL→PM and PM→TL hops. Poll briefly: feed
+        # publishes happen after audit writes and may lag a few hundred ms.
+        feed_deadline = asyncio.get_event_loop().time() + 10
+        feed_senders: list[str] = []
+        while asyncio.get_event_loop().time() < feed_deadline:
+            async with session_factory() as session:
+                feed_rows = list(
+                    (
+                        await session.execute(
+                            select(FeedEvent).where(
+                                FeedEvent.correlation_id == correlation_id
+                            )
+                        )
                     )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
-            )
-        feed_senders = sorted(r.sender for r in feed_rows)
-        assert "team_lead" in feed_senders
-        assert "product_manager" in feed_senders
+            feed_senders = sorted(r.sender for r in feed_rows)
+            if "team_lead" in feed_senders and "product_manager" in feed_senders:
+                break
+            await asyncio.sleep(0.2)
+        assert "team_lead" in feed_senders, f"feed_senders={feed_senders}"
+        assert "product_manager" in feed_senders, f"feed_senders={feed_senders}"
     finally:
         dispatcher.shutdown()
         try:
