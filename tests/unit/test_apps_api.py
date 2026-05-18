@@ -1,4 +1,8 @@
-"""FastAPI smoke tests using TestClient."""
+"""FastAPI unit-level smoke tests (routes that don't need DB/Redis).
+
+The DB-touching endpoints (/api/tasks, /api/reviews, /api/digest) are
+covered by tests/integration/test_apps_api_live.py with testcontainers.
+"""
 
 from __future__ import annotations
 
@@ -40,56 +44,11 @@ def test_tasks_rejects_wrong_token(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
-def test_tasks_accepts_valid_token(client: TestClient) -> None:
-    # OWNER_TOKEN comes from tests/conftest.py
-    import os
-
-    resp = client.post(
-        "/api/tasks",
-        json={"title": "Test", "description": "Body"},
-        headers={"Authorization": f"Bearer {os.environ['OWNER_TOKEN']}"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "task_id" in data
-    assert "correlation_id" in data
-    assert data["status"] == "queued"
+def test_reviews_requires_owner_token(client: TestClient) -> None:
+    resp = client.get("/api/reviews")
+    assert resp.status_code == 401
 
 
-def test_reviews_list_empty_iteration_0(client: TestClient) -> None:
-    import os
-
-    resp = client.get(
-        "/api/reviews",
-        headers={"Authorization": f"Bearer {os.environ['OWNER_TOKEN']}"},
-    )
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
-def test_approve_review_returns_status(client: TestClient) -> None:
-    import os
-    from uuid import uuid4
-
-    review_id = uuid4()
-    resp = client.post(
-        f"/api/reviews/{review_id}/approve",
-        json={"comment": "lgtm"},
-        headers={"Authorization": f"Bearer {os.environ['OWNER_TOKEN']}"},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "approved"
-
-
-def test_reject_review_returns_status(client: TestClient) -> None:
-    import os
-    from uuid import uuid4
-
-    review_id = uuid4()
-    resp = client.post(
-        f"/api/reviews/{review_id}/reject",
-        json={"comment": "no"},
-        headers={"Authorization": f"Bearer {os.environ['OWNER_TOKEN']}"},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "rejected"
+def test_digest_requires_owner_token(client: TestClient) -> None:
+    resp = client.get("/api/digest")
+    assert resp.status_code == 401

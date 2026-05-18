@@ -104,9 +104,7 @@ class ProductManagerAgent(BaseAgent):
     allowed_tools: ClassVar[tuple[str, ...]] = ()
     system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "product_manager.md"
 
-    def build_outputs(
-        self, response: LLMResponse, incoming: AgentMessage
-    ) -> list[AgentMessage]:
+    def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if incoming.message_type != MessageType.TASK_ASSIGNMENT or not isinstance(
             incoming.payload, TaskAssignmentPayload
         ):
@@ -137,9 +135,7 @@ class ProductManagerAgent(BaseAgent):
                     status=TaskStatus.DONE,
                     progress_pct=100,
                     summary=summary,
-                    artifacts=[
-                        str(artifact_path.relative_to(_REPO_ROOT))
-                    ] if artifact_path else [],
+                    artifacts=[str(artifact_path.relative_to(_REPO_ROOT))] if artifact_path else [],
                 ),
             )
         ]
@@ -158,5 +154,3 @@ class ProductManagerAgent(BaseAgent):
             json_schema=USER_STORIES_SCHEMA,
         )
         return self.build_outputs(response, msg)
-
-

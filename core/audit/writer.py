@@ -66,15 +66,11 @@ class AuditLogWriter:
         try:
             return await self._write_once(msg, iteration)
         except Exception:
-            _log.exception(
-                "audit.write.failed", message_id=str(msg.message_id)
-            )
+            _log.exception("audit.write.failed", message_id=str(msg.message_id))
             audit_log_write_failures_total.inc()
             raise
 
-    async def _write_once(
-        self, msg: AgentMessage, iteration: int | None
-    ) -> int:
+    async def _write_once(self, msg: AgentMessage, iteration: int | None) -> int:
         canonical = msg.canonical_json(include_signature=False)
         msg_sig = _hmac.new(self._secret, canonical, sha256).hexdigest()
 
@@ -82,9 +78,7 @@ class AuditLogWriter:
             # Read tip of the chain. Single-writer model → no FOR UPDATE.
             prev_hash = (
                 await session.execute(
-                    select(AuditLog.hmac_hash)
-                    .order_by(AuditLog.id.desc())
-                    .limit(1)
+                    select(AuditLog.hmac_hash).order_by(AuditLog.id.desc()).limit(1)
                 )
             ).scalar_one_or_none()
 

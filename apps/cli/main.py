@@ -276,7 +276,9 @@ def _resolve_review(ctx: click.Context, review_id: UUID, verb: str, comment: str
     if resp.status_code != 200:
         console.print(f"[red]Failed: {resp.status_code} {resp.text}[/]")
         sys.exit(1)
-    console.print(f"[green]Review {review_id} {verb}d.[/]")
+    # API returns proper past tense ("approved" / "rejected"); fall back to verb+ed.
+    status_str = resp.json().get("status", f"{verb}ed")
+    console.print(f"[green]Review {review_id} {status_str}.[/]")
 
 
 @cli.command()
@@ -288,10 +290,50 @@ def status(ctx: click.Context) -> None:
 
 
 @cli.command()
+@click.option("--history", is_flag=True, help="Show last N checkpoints instead of just the latest.")
+@click.option("--limit", default=10, show_default=True, type=int, help="With --history, max rows.")
 @click.pass_context
-def digest(ctx: click.Context) -> None:
-    """Request a checkpoint digest from Team Lead. (Iteration 1+)"""
-    console.print("[yellow]Not yet implemented (Iteration 1).[/]")
+def digest(ctx: click.Context, history: bool, limit: int) -> None:
+    """Show the latest Team Lead checkpoint digest (or history)."""
+    if history:
+        resp = httpx.get(
+            f"{_api_base(ctx)}/api/digest/history",
+            params={"limit": limit},
+            headers=_token_header(ctx),
+            timeout=10.0,
+        )
+        if resp.status_code != 200:
+            console.print(f"[red]Failed: {resp.status_code} {resp.text}[/]")
+            sys.exit(1)
+        items = resp.json()
+        if not items:
+            console.print("[dim]No checkpoints yet.[/]")
+            return
+        for item in items:
+            ts = item.get("created_at", "—")
+            trigger = item.get("trigger", "—")
+            quota = item.get("quota_used_pct", 0.0)
+            console.print(
+                Panel(
+                    str(item.get("digest_markdown", "")),
+                    title=f"{ts}  ·  trigger={trigger}  ·  quota={quota:.0f}%",
+                    style="cyan",
+                )
+            )
+        return
+
+    resp = httpx.get(
+        f"{_api_base(ctx)}/api/digest",
+        headers=_token_header(ctx),
+        timeout=10.0,
+    )
+    if resp.status_code != 200:
+        console.print(f"[red]Failed: {resp.status_code} {resp.text}[/]")
+        sys.exit(1)
+    data = resp.json()
+    quota = data.get("quota_used_pct", 0.0) or 0.0
+    title = f"Checkpoint  ·  trigger={data.get('trigger') or '—'}  ·  quota={quota:.0f}%"
+    console.print(Panel(str(data.get("digest_markdown", "")), title=title, style="cyan"))
 
 
 if __name__ == "__main__":

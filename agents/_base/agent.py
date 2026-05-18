@@ -80,9 +80,7 @@ class BaseAgent(ABC):
         return self.build_outputs(response, msg)
 
     @abstractmethod
-    def build_outputs(
-        self, response: LLMResponse, incoming: AgentMessage
-    ) -> list[AgentMessage]:
+    def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         """Translate the LLM response into outbound AgentMessages."""
 
     # ----- helpers subclasses may override -----
@@ -93,9 +91,7 @@ class BaseAgent(ABC):
         Default: serialise the payload as JSON, wrap in <UNTRUSTED_INPUT>.
         Subclasses can override for richer prompts.
         """
-        payload_json = json.dumps(
-            msg.payload.model_dump(mode="json"), ensure_ascii=False
-        )
+        payload_json = json.dumps(msg.payload.model_dump(mode="json"), ensure_ascii=False)
         return (
             f"You received a message of type `{msg.message_type.value}` from "
             f"`{msg.sender.value}` (correlation `{msg.correlation_id}`). "

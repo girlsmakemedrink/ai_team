@@ -17,6 +17,9 @@ def _ensure_test_env() -> Iterator[None]:
     works in tests without a .env file."""
     os.environ.setdefault("OWNER_TOKEN", "test-token-32-chars-aaaaaaaaaaaaaaaaa")
     os.environ.setdefault("HMAC_SECRET", "test-secret-32-chars-bbbbbbbbbbbbbbbb")
+    # Don't auto-start the dispatcher in unit tests — no Redis/Postgres.
+    # Integration tests override this back to "true".
+    os.environ.setdefault("AI_TEAM_DISPATCHER_AUTOSTART", "false")
     yield
 
 

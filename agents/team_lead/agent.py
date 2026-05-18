@@ -75,9 +75,7 @@ class TeamLeadAgent(BaseAgent):
         Path(__file__).resolve().parents[2] / "prompts" / "team_lead.md"
     )
 
-    def build_outputs(
-        self, response: LLMResponse, incoming: AgentMessage
-    ) -> list[AgentMessage]:
+    def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if incoming.message_type != MessageType.TASK_ASSIGNMENT:
             self._log.info(
                 "tl.ignore_non_assignment",

@@ -84,9 +84,7 @@ class ClaudeCodeHeadlessClient:
     ) -> LLMResponse:
         model_id = _resolve_model_id(model)
         effective_budget = (
-            max_budget_usd
-            if max_budget_usd is not None
-            else DEFAULT_MAX_BUDGET_USD_PER_TIER[model]
+            max_budget_usd if max_budget_usd is not None else DEFAULT_MAX_BUDGET_USD_PER_TIER[model]
         )
 
         cmd: list[str] = [

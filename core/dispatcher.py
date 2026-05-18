@@ -76,9 +76,7 @@ class AgentDispatcher:
         log = _log.bind(agent=agent.role.value)
         log.info("dispatcher.agent.start")
         try:
-            async for entry_id, msg in self._bus.consume(
-                agent.role, consumer_name=consumer_name
-            ):
+            async for entry_id, msg in self._bus.consume(agent.role, consumer_name=consumer_name):
                 if self._shutdown.is_set():
                     break
                 await self._handle_one(agent, msg, entry_id)
@@ -87,21 +85,15 @@ class AgentDispatcher:
             raise
         except Exception:
             log.exception("dispatcher.agent.crashed")
-            agent_errors_total.labels(
-                agent=agent.role.value, error_type="loop_crash"
-            ).inc()
+            agent_errors_total.labels(agent=agent.role.value, error_type="loop_crash").inc()
 
-    async def _handle_one(
-        self, agent: BaseAgent, msg: AgentMessage, entry_id: str
-    ) -> None:
+    async def _handle_one(self, agent: BaseAgent, msg: AgentMessage, entry_id: str) -> None:
         token = bind_correlation_id(msg.correlation_id)
         try:
             try:
                 self._signer.verify(msg)
             except InvalidSignatureError:
-                agent_errors_total.labels(
-                    agent=agent.role.value, error_type="bad_signature"
-                ).inc()
+                agent_errors_total.labels(agent=agent.role.value, error_type="bad_signature").inc()
                 _log.warning(
                     "dispatcher.signature.invalid",
                     sender=msg.sender.value,
@@ -110,8 +102,9 @@ class AgentDispatcher:
                 await self._bus.ack(agent.role, entry_id)
                 return
 
-            # Audit the inbound (this agent received this message).
-            await self._audit.write_message(msg, iteration=self._iteration)
+            # No inbound audit — every cross-agent message is audited
+            # by its publisher (API for user messages; this same dispatcher
+            # for agent→agent outputs). Avoids double-rows in the chain.
 
             outputs: list[AgentMessage] = []
             with agent_message_processing_duration.labels(
@@ -124,9 +117,7 @@ class AgentDispatcher:
                         "dispatcher.agent.handle.failed",
                         agent=agent.role.value,
                     )
-                    agent_errors_total.labels(
-                        agent=agent.role.value, error_type="handle"
-                    ).inc()
+                    agent_errors_total.labels(agent=agent.role.value, error_type="handle").inc()
 
             for out in outputs:
                 signed = self._signer.with_signature(out)

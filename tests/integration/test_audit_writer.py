@@ -1,11 +1,13 @@
 """Integration tests for AuditLogWriter: HMAC + prev_hash chain."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, update
+import pytest_asyncio
+from sqlalchemy import delete, select, update
 
 from core.audit.writer import AuditLogWriter
 from core.messaging.schemas import (
@@ -24,6 +26,16 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _SECRET = b"a" * 64
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_audit_log(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Wipe audit_log before each test so chain assertions are deterministic."""
+    async with session_factory() as session:
+        await session.execute(delete(AuditLog))
+        await session.commit()
 
 
 def _make_msg(summary: str = "test") -> AgentMessage:
@@ -49,9 +61,7 @@ async def test_writes_first_row_with_no_prev_hash(
     msg = _make_msg("first")
     row_id = await writer.write_message(msg)
 
-    row = (
-        await db_session.execute(select(AuditLog).where(AuditLog.id == row_id))
-    ).scalar_one()
+    row = (await db_session.execute(select(AuditLog).where(AuditLog.id == row_id))).scalar_one()
     assert row.prev_hash is None
     assert row.hmac_sig
     assert row.hmac_hash
@@ -67,10 +77,14 @@ async def test_chain_links_subsequent_rows(
     id3 = await writer.write_message(_make_msg("three"))
 
     rows = (
-        await db_session.execute(
-            select(AuditLog).where(AuditLog.id.in_([id1, id2, id3])).order_by(AuditLog.id)
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.id.in_([id1, id2, id3])).order_by(AuditLog.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     # Each row's prev_hash matches the previous row's hmac_hash.
     assert rows[1].prev_hash == rows[0].hmac_hash
@@ -99,17 +113,15 @@ async def test_verify_chain_detects_tamper(
     # stays the same, so the verifier should flag the row as broken
     # because canonical(payload) no longer matches.
     middle = (
-        await db_session.execute(
-            select(AuditLog).order_by(AuditLog.id).limit(3)
-        )
-    ).scalars().all()[1]
+        (await db_session.execute(select(AuditLog).order_by(AuditLog.id).limit(3)))
+        .scalars()
+        .all()[1]
+    )
 
     corrupted_payload = dict(middle.payload_json)
     corrupted_payload["sender"] = "team_lead"  # change a field
     await db_session.execute(
-        update(AuditLog)
-        .where(AuditLog.id == middle.id)
-        .values(payload_json=corrupted_payload)
+        update(AuditLog).where(AuditLog.id == middle.id).values(payload_json=corrupted_payload)
     )
     await db_session.commit()
 

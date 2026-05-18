@@ -75,8 +75,7 @@ async def _persist_event(
             session.add(row)
             await session.commit()
     except Exception as e:
-        _log.warning("feed.persist.failed", error=str(e),
-                     message_id=event.get("message_id"))
+        _log.warning("feed.persist.failed", error=str(e), message_id=event.get("message_id"))
         audit_log_write_failures_total.inc()
 
 

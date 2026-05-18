@@ -81,7 +81,10 @@ alembic-rev: ## New alembic revision (usage: make alembic-rev MSG="description")
 smoke-llm: ## Validate `claude -p` substrate (ADR-008)
 	uv run python scripts/smoke_claude_p.py
 
-demo: ## Run Iteration 0 demo end-to-end
+demo: ## Run Iteration 1 demo end-to-end (TL + PM live)
+	bash scripts/demo_iter_1.sh
+
+demo-iter-0: ## Run the Iteration 0 demo (foundation only)
 	bash scripts/demo_iter_0.sh
 
 # === Cleanup ===

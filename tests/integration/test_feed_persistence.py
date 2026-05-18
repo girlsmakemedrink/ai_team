@@ -1,4 +1,5 @@
 """Smoke that testcontainers fixtures work + feed_events persistence."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -46,9 +47,9 @@ async def test_pg_and_redis_containers_alive(
 ) -> None:
     assert "asyncpg" in pg_dsn
     assert redis_url.startswith("redis://")
-    # session is connected and migrations applied → tables exist
-    rows = (await db_session.execute(select(FeedEvent).limit(1))).all()
-    assert rows == []  # empty but queryable
+    # Tables exist + queryable (don't assert empty — other tests in the
+    # same session may have written rows).
+    await db_session.execute(select(FeedEvent).limit(1))
 
 
 async def test_feed_publisher_persists_event(
@@ -67,10 +68,10 @@ async def test_feed_publisher_persists_event(
 
     # Verify DB row written.
     rows = (
-        await db_session.execute(
-            select(FeedEvent).where(FeedEvent.message_id == msg.message_id)
-        )
-    ).scalars().all()
+        (await db_session.execute(select(FeedEvent).where(FeedEvent.message_id == msg.message_id)))
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].summary.startswith("[P3] team_lead")
     assert rows[0].redacted_payload["status"] == "done"
@@ -87,8 +88,6 @@ async def test_feed_publisher_without_db_factory_only_pubsubs(
 
     assert event is not None
     rows = (
-        await db_session.execute(
-            select(FeedEvent).where(FeedEvent.message_id == msg.message_id)
-        )
+        await db_session.execute(select(FeedEvent).where(FeedEvent.message_id == msg.message_id))
     ).all()
     assert rows == []  # no DB write

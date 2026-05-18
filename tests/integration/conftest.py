@@ -73,7 +73,11 @@ def _alembic_upgrade(pg_dsn: str) -> None:
     env["POSTGRES_DSN"] = pg_dsn
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=ROOT, env=env, check=True, capture_output=True, text=True,
+        cwd=ROOT,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
     )
 
 
