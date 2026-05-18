@@ -39,12 +39,14 @@ for the current iteration scope and `docs/iterations/` for the full plan.
 git clone https://github.com/girlsmakemedrink/ai_team.git
 cd ai_team
 
-make dev          # install deps, pre-commit, .env scaffold
+make dev          # install deps, pre-commit, pre-push hook, .env scaffold
 make up           # start postgres, redis, prometheus, grafana
 make test         # unit + integration with mocked LLM
 make smoke-llm    # validate `claude -p` substrate (ADR-008)
 make demo         # Iteration 0 demo: publish test message, see it in CLI feed
 ```
+
+The pre-push hook installed by `make dev` (or `make install-hooks` standalone) runs `make lint && ruff format --check && make test` before every `git push`, so CI doesn't waste a cycle on a format-only fail. Run `make fix` to auto-apply formatting if the hook trips.
 
 ## How it works (at a glance)
 

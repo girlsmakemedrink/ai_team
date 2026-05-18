@@ -62,3 +62,4 @@ docs/backlog/*.md
 # Misc
 *.pid
 *.bak
+.iter2-mcp.json

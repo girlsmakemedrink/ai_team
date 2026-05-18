@@ -1,9 +1,9 @@
 .DEFAULT_GOAL := help
-.PHONY: help install dev up down logs ps restart \
+.PHONY: help install dev install-hooks up down logs ps restart \
         test test-unit test-integration test-smoke test-real-llm \
-        lint typecheck format fix sec \
+        lint typecheck format format-check fix sec \
         migrate alembic-rev \
-        smoke-llm demo \
+        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 \
         clean
 
 help: ## Show available targets
@@ -12,10 +12,22 @@ help: ## Show available targets
 install: ## Install all dependencies via uv
 	uv sync --all-extras
 
-dev: install ## Set up dev environment (install + pre-commit + .env)
+dev: install install-hooks ## Set up dev environment (install + pre-commit + pre-push + .env)
 	uv run pre-commit install
 	uv run pre-commit install --hook-type commit-msg
 	@if [ ! -f .env ]; then cp .env.example .env && echo "Created .env from template — fill in secrets"; fi
+
+install-hooks: ## Symlink .githooks/pre-push into this checkout's hooks dir
+	@# Hooks dirs are shared across worktrees from the same repo (git's
+	@# default), so the symlink target gets baked in as an absolute path
+	@# of WHICHEVER checkout ran this. If you swap checkouts (or delete a
+	@# worktree the symlink points at), re-run `make install-hooks` from
+	@# the new one. We accept this re-install step rather than touch
+	@# `git config core.hooksPath`.
+	@hooksdir="$$(git rev-parse --git-path hooks)"; \
+	 mkdir -p "$$hooksdir"; \
+	 ln -sf "$$(pwd)/.githooks/pre-push" "$$hooksdir/pre-push"; \
+	 echo "Installed pre-push hook → $$hooksdir/pre-push"
 
 up: ## Start infra: postgres, redis, prometheus, grafana
 	docker compose -f infra/docker-compose.yml up -d
@@ -61,6 +73,9 @@ typecheck: ## Mypy strict
 format: ## Ruff format
 	uv run ruff format .
 
+format-check: ## Ruff format in check-mode (used by pre-push hook)
+	uv run ruff format --check .
+
 fix: ## Auto-fix lint + format
 	uv run ruff check --fix .
 	uv run ruff format .
@@ -81,7 +96,12 @@ alembic-rev: ## New alembic revision (usage: make alembic-rev MSG="description")
 smoke-llm: ## Validate `claude -p` substrate (ADR-008)
 	uv run python scripts/smoke_claude_p.py
 
-demo: ## Run Iteration 1 demo end-to-end (TL + PM live)
+demo: demo-iter-2 ## Alias for the current iteration's demo
+
+demo-iter-2: ## Run iter-2 end-to-end (TL → Architect → Backend → QA)
+	bash scripts/demo_iter_2.sh
+
+demo-iter-1: ## Run the Iteration 1 demo (TL + PM live)
 	bash scripts/demo_iter_1.sh
 
 demo-iter-0: ## Run the Iteration 0 demo (foundation only)

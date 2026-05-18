@@ -57,15 +57,29 @@ class ClaudeCodeHeadlessClient:
     - `--max-turns` is **not** an available flag. We rely on
       `--max-budget-usd` for hard budget enforcement and on the agent's
       own prompt to bound turns.
-    - Session resumption: `--resume <uuid>` reattaches to a previous
-      conversation. We use it for prompt caching across turns within
-      one `(agent, correlation)` tree.
+    - Session flags are split: `--session-id <uuid>` *creates* a session
+      with that ID (errors with "Session ID is already in use" if the
+      ID was previously used). `--resume <sid>` *reattaches* to an
+      existing session (errors if it doesn't exist). This client tracks
+      which IDs it has already created in this process and switches
+      automatically: first call → `--session-id`, subsequent calls with
+      the same ID → `--resume`. This is what gives us prompt caching
+      across turns. On process restart the tracking is lost; callers
+      must pass a fresh uuid (each AgentMessage already does, via its
+      own correlation_id).
     - Sessions persist under `~/.claude` unless `--no-session-persistence`
       is set. We let them persist for resumption.
     """
 
     def __init__(self, *, binary: str = "claude") -> None:
         self._binary = binary
+        # Session IDs this client has already passed via `--session-id`
+        # in the current process. Subsequent calls with the same id are
+        # rewritten to `--resume` so prompt caching works (see class
+        # docstring). Plain set is fine — every invoke() awaits its own
+        # subprocess and each AgentMessage carries a unique correlation_id,
+        # so two concurrent invokes won't race on the same session_id.
+        self._claimed_sessions: set[str] = set()
 
     async def invoke(
         self,
@@ -105,12 +119,18 @@ class ClaudeCodeHeadlessClient:
         if disallowed_tools:
             cmd += ["--disallowed-tools", ",".join(disallowed_tools)]
         if session_id:
-            # `--session-id` creates the session on first use and reuses it
-            # on subsequent calls. `--resume` would error on an unknown id,
-            # which breaks the first call of every (agent, correlation).
-            cmd += ["--session-id", session_id]
-        if mcp_config_path:
-            cmd += ["--mcp-config", mcp_config_path]
+            if session_id in self._claimed_sessions:
+                cmd += ["--resume", session_id]
+            else:
+                cmd += ["--session-id", session_id]
+                self._claimed_sessions.add(session_id)
+        # When mcp_config_path isn't passed explicitly, fall back to the
+        # AI_TEAM_MCP_CONFIG_PATH env var so the demo script can plumb in
+        # the MCP servers without changing per-agent code. The env var is
+        # the iter-2 wiring; per-agent config files are iter-2b material.
+        effective_mcp = mcp_config_path or os.environ.get("AI_TEAM_MCP_CONFIG_PATH")
+        if effective_mcp:
+            cmd += ["--mcp-config", effective_mcp]
         if json_schema is not None:
             cmd += ["--json-schema", json.dumps(json_schema, separators=(",", ":"))]
 
@@ -156,12 +176,22 @@ class ClaudeCodeHeadlessClient:
             tokens_in=response.tokens.input,
             tokens_out=response.tokens.output,
             cost_cents=response.cost_estimate_cents,
+            schema_requested=json_schema is not None,
+            validated_against_schema=response.validated_against_schema,
         )
         return response
 
     async def reset_session(self, session_id: str) -> None:
-        """No-op: claude sessions are file-backed and expire naturally."""
-        _log.debug("llm.reset_session.noop", session_id=session_id)
+        """Forget our local claim on this session id.
+
+        The on-disk claude session is not deleted (it expires naturally).
+        After this call, the next invoke() with the same id would issue a
+        new `--session-id` and claude would reject it as already-in-use;
+        callers should generate a new uuid instead. Provided for tests
+        and as a potential unwind path on quota-exhausted errors.
+        """
+        self._claimed_sessions.discard(session_id)
+        _log.debug("llm.reset_session.unclaimed", session_id=session_id)
 
     # ----- internals -----
 
@@ -194,12 +224,16 @@ class ClaudeCodeHeadlessClient:
         text: str = str(data.get("result", ""))
         # When --json-schema was passed, the validated object lives in
         # `structured_output`. Otherwise try to extract JSON from the
-        # natural-language `result`.
+        # natural-language `result`. `validated_against_schema` records
+        # which branch we took so callers (and the feed digest) can see
+        # per-turn schema conformance without re-parsing the raw blob.
         raw_structured = data.get("structured_output")
         if isinstance(raw_structured, dict):
             structured: dict[str, Any] | None = raw_structured
+            validated_against_schema = True
         else:
             structured = self._maybe_parse_json(text)
+            validated_against_schema = False
 
         tools_used: list[ToolUse] = []
         for t in data.get("tools_used", []):
@@ -224,6 +258,7 @@ class ClaudeCodeHeadlessClient:
             tokens=tokens,
             cost_estimate_cents=estimate_cost_cents(model_id, tokens),
             duration_ms=duration_ms,
+            validated_against_schema=validated_against_schema,
             raw=data,
         )
 

@@ -7,6 +7,16 @@
     "ai-team-tasks": {
       "command": "uv",
       "args": ["run", "python", "-m", "tools.mcp_servers.ai_team_tasks"]
+    },
+    "ai-team-repo": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "tools.mcp_servers.ai_team_repo"],
+      "env": {
+        "AI_TEAM_REPO_ROOT": "${AI_TEAM_REPO_ROOT}",
+        "AI_TEAM_PATH_PREFIXES": "${AI_TEAM_PATH_PREFIXES}",
+        "AI_TEAM_PR_BASE": "${AI_TEAM_PR_BASE:-main}",
+        "AI_TEAM_FORBID_BRANCH_RE": "${AI_TEAM_FORBID_BRANCH_RE:-^(main|master|release/.*)$}"
+      }
     }
   }
 }

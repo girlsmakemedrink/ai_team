@@ -1,6 +1,6 @@
 # Iteration 0 — `claude -p` smoke report
 
-Date: 2026-05-18 15:03:42 UTC
+Date: 2026-05-18 20:08:32 UTC
 Result: **PASS ✓**
 
 See [ADR-008](../adr/0008-llm-access-strategy.md) for the validation contract.
@@ -12,9 +12,9 @@ See [ADR-008](../adr/0008-llm-access-strategy.md) for the validation contract.
   "concurrent_n": 5,
   "successes": 5,
   "errors": 0,
-  "total_wall_s": 5.04,
-  "max_ms": 5042,
-  "median_ms": 4614,
+  "total_wall_s": 16.98,
+  "max_ms": 16982,
+  "median_ms": 13214,
   "error_samples": []
 }
 ```
@@ -23,7 +23,7 @@ See [ADR-008](../adr/0008-llm-access-strategy.md) for the validation contract.
 ```json
 {
   "passed": true,
-  "text_preview": "BLOCKED.",
+  "text_preview": "BLOCKED",
   "tools_used": []
 }
 ```
@@ -33,20 +33,20 @@ See [ADR-008](../adr/0008-llm-access-strategy.md) for the validation contract.
 {
   "passed": true,
   "tokens_input": 10,
-  "tokens_output": 38,
-  "cached_input": 24636,
+  "tokens_output": 159,
+  "cached_input": 26958,
   "cost_cents_estimated": 0,
   "session_id_present": true
 }
 ```
 
-## ✓ resume_caching
+## ✓ session_id_caching
 ```json
 {
   "passed": true,
   "first_input_tokens": 10,
   "second_input_tokens": 10,
-  "second_cached_input_tokens": 32137,
+  "second_cached_input_tokens": 40707,
   "cache_pct": 100.0
 }
 ```
@@ -56,11 +56,13 @@ See [ADR-008](../adr/0008-llm-access-strategy.md) for the validation contract.
 {
   "passed": true,
   "latencies_ms": [
-    2874,
-    4500,
-    4214
+    5070,
+    5628,
+    9437,
+    3846,
+    5582
   ],
-  "median_ms": 4214,
-  "max_ms": 4500
+  "median_ms": 5582,
+  "max_ms": 9437
 }
 ```

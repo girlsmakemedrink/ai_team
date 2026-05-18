@@ -13,3 +13,20 @@ rules:
     - 1
     - always
     - 100
+  # `@commitlint/config-conventional` defaults `subject-case` to reject
+  # sentence-case / start-case / pascal-case / upper-case. That collides
+  # with legitimate technical identifiers in our subject lines:
+  # "LLMResponse.validated_against_schema", "Day-1A — cache report",
+  # "ADR-0010", "Architect agent", etc. We keep the rest of the
+  # conventional-commits discipline (type/scope/colon, max-length) and
+  # drop title-case policing.
+  subject-case:
+    - 0
+  # Footers (trailers like `Co-Authored-By:`, `Closes:`) shouldn't be
+  # length-capped — `Co-Authored-By: <Name> <long-email>` legitimately
+  # exceeds 100 chars. Also, the conventional-commits parser sometimes
+  # absorbs the last body paragraph into "footer" when a trailer
+  # follows, which makes the body-max-line-length 100-char warning
+  # surface as a footer-max-line-length error. Disable.
+  footer-max-line-length:
+    - 0
