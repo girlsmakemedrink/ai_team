@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import structlog
 from redis.asyncio import Redis
 
 from core.messaging.schemas import AgentId, AgentMessage
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 _log = structlog.get_logger(__name__)
 
@@ -35,7 +37,7 @@ class MessageBus:
     competing consumers within the group.
     """
 
-    def __init__(self, redis: Redis) -> None:
+    def __init__(self, redis: Redis[bytes]) -> None:
         self._redis = redis
 
     @classmethod
@@ -48,7 +50,7 @@ class MessageBus:
                 await self._redis.xgroup_create(
                     stream_name(agent), group_name(agent), id="$", mkstream=True
                 )
-            except Exception as e:  # noqa: BLE001  Redis exception variety
+            except Exception as e:
                 if "BUSYGROUP" in str(e):
                     continue
                 raise
@@ -85,21 +87,21 @@ class MessageBus:
                 for entry_id, fields in entries:
                     eid = self._decode(entry_id)
                     raw = self._extract_msg(fields)
-                    msg = self._parse_or_dlq(raw, eid=eid, stream=target, group=group)
+                    msg = await self._parse_or_dlq(raw, eid=eid, stream=target, group=group)
                     if msg is not None:
                         yield eid, msg
 
     async def ack(self, agent: AgentId | str, entry_id: str) -> None:
-        await self._redis.xack(stream_name(agent), group_name(agent), entry_id)
+        await self._redis.xack(stream_name(agent), group_name(agent), entry_id)  # type: ignore[no-untyped-call]
 
     async def queue_depth(self, agent: AgentId | str) -> int:
         try:
             return int(await self._redis.xlen(stream_name(agent)))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return 0
 
     async def close(self) -> None:
-        await self._redis.aclose()
+        await self._redis.aclose()  # type: ignore[attr-defined]
 
     # ----- internals -----
 
@@ -118,12 +120,12 @@ class MessageBus:
         self, raw: str | None, *, eid: str, stream: str, group: str
     ) -> AgentMessage | None:
         if raw is None:
-            await self._redis.xack(stream, group, eid)
+            await self._redis.xack(stream, group, eid)  # type: ignore[no-untyped-call]
             return None
         try:
             return AgentMessage.model_validate_json(raw)
         except Exception as e:  # noqa: BLE001
             _log.warning("bus.consume.invalid_msg", entry_id=eid, error=str(e))
             await self._redis.xadd(DLQ_STREAM, {"raw": raw, "reason": str(e)})
-            await self._redis.xack(stream, group, eid)
+            await self._redis.xack(stream, group, eid)  # type: ignore[no-untyped-call]
             return None

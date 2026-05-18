@@ -1,0 +1,37 @@
+name: Real LLM tests
+
+# Hits real `claude -p` via subscription auth. Cannot run on stock
+# GitHub-hosted runners (no authenticated `claude` CLI). This workflow is
+# wired to run only on the self-hosted runner provisioned in Iteration 5.
+# Until then, it's a manual-trigger placeholder.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "smoke | regression"
+        default: "smoke"
+        required: true
+  schedule:
+    - cron: "0 4 * * *"  # 04:00 UTC nightly (when self-hosted runner exists)
+
+concurrency:
+  group: real-llm
+  cancel-in-progress: false
+
+jobs:
+  real-llm:
+    # Switch `runs-on` to the self-hosted runner label in Iteration 5.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OWNER_TOKEN: ci-token-32-chars-aaaaaaaaaaaaaaaaa
+      HMAC_SECRET: ci-secret-32-chars-bbbbbbbbbbbbbbbb
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip until self-hosted runner exists (Iteration 5)
+        run: |
+          echo "::warning::Real-LLM CI requires an authenticated `claude` CLI."
+          echo "::warning::Wire to self-hosted runner in Iteration 5."
+          exit 78  # neutral — does not fail the build

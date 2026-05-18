@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import sys
 from contextvars import ContextVar, Token
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 import structlog
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 correlation_id_var: ContextVar[str | None] = ContextVar("correlation_id", default=None)
 
@@ -20,7 +22,7 @@ def configure_logging(level: str = "INFO") -> None:
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
-            _add_correlation_id,
+            _add_correlation_id,  # type: ignore[list-item]
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", utc=True),
             structlog.processors.StackInfoRenderer(),
@@ -34,9 +36,7 @@ def configure_logging(level: str = "INFO") -> None:
     )
 
 
-def _add_correlation_id(
-    _logger: Any, _name: str, event_dict: dict[str, Any]
-) -> dict[str, Any]:
+def _add_correlation_id(_logger: Any, _name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     cid = correlation_id_var.get()
     if cid:
         event_dict["correlation_id"] = cid

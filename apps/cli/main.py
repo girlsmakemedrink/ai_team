@@ -5,17 +5,17 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from datetime import UTC, datetime
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 import click
 import httpx
 from rich.console import Console
-from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 console = Console()
 
@@ -50,7 +50,7 @@ def _color_for(agent: str) -> str:
 
 
 def _api_base(ctx: click.Context) -> str:
-    return ctx.obj["api_base"]
+    return str(ctx.obj["api_base"])
 
 
 def _token_header(ctx: click.Context) -> dict[str, str]:
@@ -83,11 +83,16 @@ def _render_event(event: dict[str, Any]) -> Text:
 
 
 @click.group()
-@click.option("--api-base", default="http://localhost:8000",
-              show_default=True, envvar="AI_TEAM_API_BASE",
-              help="Base URL of the ai_team API.")
-@click.option("--owner-token", envvar="OWNER_TOKEN",
-              help="Owner token (or set OWNER_TOKEN in env / .env).")
+@click.option(
+    "--api-base",
+    default="http://localhost:8000",
+    show_default=True,
+    envvar="AI_TEAM_API_BASE",
+    help="Base URL of the ai_team API.",
+)
+@click.option(
+    "--owner-token", envvar="OWNER_TOKEN", help="Owner token (or set OWNER_TOKEN in env / .env)."
+)
 @click.pass_context
 def cli(ctx: click.Context, api_base: str, owner_token: str | None) -> None:
     """ai-team — multi-agent dev team CLI."""
@@ -105,15 +110,16 @@ def up() -> None:
     import subprocess
 
     console.print("[bold]Running `make up`…[/]")
-    subprocess.run(["make", "up"], check=False)  # noqa: S603, S607
+    subprocess.run(["make", "up"], check=False)  # noqa: S607
 
 
 @cli.command()
 @click.option("--agent", default=None, help="Filter to one agent.")
 @click.option("--correlation", default=None, help="Filter to one correlation_id.")
 @click.option("--priority", default=None, help="Comma-separated priorities (e.g. P1,P2).")
-@click.option("--no-internal/--with-internal", default=True,
-              help="Hide heartbeats and low-signal events.")
+@click.option(
+    "--no-internal/--with-internal", default=True, help="Hide heartbeats and low-signal events."
+)
 @click.option("--json", "json_out", is_flag=True, default=False, help="Machine output.")
 @click.pass_context
 def watch(
@@ -126,14 +132,16 @@ def watch(
 ) -> None:
     """Live-tail the team_feed."""
     priorities = set(priority.split(",")) if priority else None
-    asyncio.run(_run_watch(
-        api_base=_api_base(ctx),
-        agent=agent,
-        correlation=correlation,
-        priorities=priorities,
-        no_internal=no_internal,
-        json_out=json_out,
-    ))
+    asyncio.run(
+        _run_watch(
+            api_base=_api_base(ctx),
+            agent=agent,
+            correlation=correlation,
+            priorities=priorities,
+            no_internal=no_internal,
+            json_out=json_out,
+        )
+    )
 
 
 async def _run_watch(
@@ -146,46 +154,47 @@ async def _run_watch(
     json_out: bool,
 ) -> None:
     console.print(f"[dim]Connecting to {api_base}/api/feed/stream …[/]")
-    async with httpx.AsyncClient(base_url=api_base, timeout=None) as client:
-        async with client.stream("GET", "/api/feed/stream") as resp:
-            if resp.status_code != 200:
-                console.print(f"[red]Failed to connect: HTTP {resp.status_code}[/]")
-                sys.exit(1)
-            async for raw in resp.aiter_lines():
-                if not raw or not raw.startswith("data:"):
-                    continue
-                payload = raw[len("data:"):].strip()
-                if not payload:
-                    continue
-                try:
-                    event = json.loads(payload)
-                except json.JSONDecodeError:
-                    continue
+    # SSE stream — infinite timeout is intentional.
+    async with (
+        httpx.AsyncClient(base_url=api_base, timeout=None) as client,  # noqa: S113
+        client.stream("GET", "/api/feed/stream") as resp,
+    ):
+        if resp.status_code != 200:
+            console.print(f"[red]Failed to connect: HTTP {resp.status_code}[/]")
+            sys.exit(1)
+        async for raw in resp.aiter_lines():
+            if not raw or not raw.startswith("data:"):
+                continue
+            payload = raw[len("data:") :].strip()
+            if not payload:
+                continue
+            try:
+                event = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
 
-                if agent and agent not in (event.get("sender"), event.get("recipient")):
-                    continue
-                if correlation and not str(event.get("correlation_id", "")).startswith(correlation):
-                    continue
-                if priorities and event.get("priority") not in priorities:
-                    continue
-                if no_internal and event.get("message_type") == "heartbeat":
-                    continue
+            if agent and agent not in (event.get("sender"), event.get("recipient")):
+                continue
+            if correlation and not str(event.get("correlation_id", "")).startswith(correlation):
+                continue
+            if priorities and event.get("priority") not in priorities:
+                continue
+            if no_internal and event.get("message_type") == "heartbeat":
+                continue
 
-                if json_out:
-                    sys.stdout.write(payload + "\n")
-                    sys.stdout.flush()
-                else:
-                    console.print(_render_event(event))
+            if json_out:
+                sys.stdout.write(payload + "\n")
+                sys.stdout.flush()
+            else:
+                console.print(_render_event(event))
 
 
 @cli.command()
 @click.option("--title", required=True)
 @click.option("--description", required=True)
-@click.option("--target-repo", default=None,
-              help="Override TARGET_REPO (default: ai_team itself).")
+@click.option("--target-repo", default=None, help="Override TARGET_REPO (default: ai_team itself).")
 @click.pass_context
-def submit(ctx: click.Context, title: str, description: str,
-           target_repo: str | None) -> None:
+def submit(ctx: click.Context, title: str, description: str, target_repo: str | None) -> None:
     """Submit a new task to the Team Lead."""
     body: dict[str, Any] = {"title": title, "description": description}
     if target_repo:
@@ -201,13 +210,16 @@ def submit(ctx: click.Context, title: str, description: str,
         console.print(f"[red]Failed: {resp.status_code} {resp.text}[/]")
         sys.exit(1)
     data = resp.json()
-    console.print(Panel(
-        f"[bold]Task queued.[/]\n"
-        f"  task_id:        {data['task_id']}\n"
-        f"  correlation_id: {data['correlation_id']}\n"
-        f"  status:         {data['status']}",
-        title="Task submitted", style="green",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Task queued.[/]\n"
+            f"  task_id:        {data['task_id']}\n"
+            f"  correlation_id: {data['correlation_id']}\n"
+            f"  status:         {data['status']}",
+            title="Task submitted",
+            style="green",
+        )
+    )
 
 
 @cli.command(name="list-pending")
@@ -254,9 +266,7 @@ def reject(ctx: click.Context, review_id: UUID, comment: str) -> None:
     _resolve_review(ctx, review_id, "reject", comment)
 
 
-def _resolve_review(
-    ctx: click.Context, review_id: UUID, verb: str, comment: str | None
-) -> None:
+def _resolve_review(ctx: click.Context, review_id: UUID, verb: str, comment: str | None) -> None:
     resp = httpx.post(
         f"{_api_base(ctx)}/api/reviews/{review_id}/{verb}",
         json={"comment": comment},

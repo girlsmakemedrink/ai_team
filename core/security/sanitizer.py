@@ -8,8 +8,8 @@ _CLOSE = "</UNTRUSTED_INPUT>"
 # What we substitute for occurrences of the closing tag *inside* the
 # untrusted content, so the model can't be tricked into "closing" the
 # marker early.
-_CLOSE_ESCAPE = "<​/UNTRUSTED_INPUT>"
-_OPEN_ESCAPE = "<​UNTRUSTED_INPUT>"
+_CLOSE_ESCAPE = "<\u200b/UNTRUSTED_INPUT>"
+_OPEN_ESCAPE = "<\u200bUNTRUSTED_INPUT>"
 
 
 def wrap_untrusted(text: str) -> str:

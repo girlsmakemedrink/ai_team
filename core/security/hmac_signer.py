@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hmac
 from hashlib import sha256
+from typing import TYPE_CHECKING
 
-from core.messaging.schemas import AgentMessage
+if TYPE_CHECKING:
+    from core.messaging.schemas import AgentMessage
 
 
 class InvalidSignatureError(Exception):
@@ -20,9 +22,11 @@ class HMACSigner:
     independent of clock or formatting.
     """
 
+    MIN_SECRET_BYTES: int = 32
+
     def __init__(self, secret: bytes) -> None:
-        if len(secret) < 32:
-            raise ValueError("HMAC secret must be at least 32 bytes")
+        if len(secret) < self.MIN_SECRET_BYTES:
+            raise ValueError(f"HMAC secret must be at least {self.MIN_SECRET_BYTES} bytes")
         self._secret = secret
 
     @classmethod
@@ -30,9 +34,7 @@ class HMACSigner:
         return cls(secret.encode())
 
     def sign(self, message: AgentMessage) -> str:
-        digest = hmac.new(
-            self._secret, message.canonical_json(include_signature=False), sha256
-        )
+        digest = hmac.new(self._secret, message.canonical_json(include_signature=False), sha256)
         return digest.hexdigest()
 
     def verify(self, message: AgentMessage) -> None:

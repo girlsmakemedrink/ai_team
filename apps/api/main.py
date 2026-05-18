@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID, uuid4
 
 import structlog
@@ -17,6 +16,9 @@ from sse_starlette.sse import EventSourceResponse
 from core.config import Settings, get_settings
 from core.messaging.feed import FeedSubscriber
 from core.observability import configure_logging, render_metrics
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 _log = structlog.get_logger(__name__)
 
@@ -47,9 +49,7 @@ def require_owner_token(
         )
     expected = "Bearer " + settings.owner_token.get_secret_value()
     if authorization != expected:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid owner token"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid owner token")
 
 
 # === Health & metrics ===
@@ -115,9 +115,7 @@ async def submit_task(req: SubmitTaskRequest) -> SubmitTaskResponse:
         correlation_id=str(correlation_id),
         title_len=len(req.title),
     )
-    return SubmitTaskResponse(
-        task_id=task_id, correlation_id=correlation_id, status="queued"
-    )
+    return SubmitTaskResponse(task_id=task_id, correlation_id=correlation_id, status="queued")
 
 
 # === Reviews (stub) ===
@@ -140,16 +138,13 @@ class ApproveBody(BaseModel):
     comment: str | None = None
 
 
-@app.post("/api/reviews/{review_id}/approve",
-          dependencies=[Depends(require_owner_token)])
+@app.post("/api/reviews/{review_id}/approve", dependencies=[Depends(require_owner_token)])
 async def approve_review(review_id: UUID, body: ApproveBody) -> dict[str, str]:
-    _log.info("api.review.approve", review_id=str(review_id),
-              has_comment=body.comment is not None)
+    _log.info("api.review.approve", review_id=str(review_id), has_comment=body.comment is not None)
     return {"status": "approved", "review_id": str(review_id)}
 
 
-@app.post("/api/reviews/{review_id}/reject",
-          dependencies=[Depends(require_owner_token)])
+@app.post("/api/reviews/{review_id}/reject", dependencies=[Depends(require_owner_token)])
 async def reject_review(review_id: UUID, body: ApproveBody) -> dict[str, str]:
     _log.info("api.review.reject", review_id=str(review_id))
     return {"status": "rejected", "review_id": str(review_id)}

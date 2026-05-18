@@ -11,9 +11,12 @@ Tracking: revisit by 2026-09-01 or sooner if Anthropic announces.
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING
 
-from core.llm.base import LLMResponse, ModelTier
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from core.llm.base import LLMResponse, ModelTier
 
 
 class ClaudeAgentSDKClient:

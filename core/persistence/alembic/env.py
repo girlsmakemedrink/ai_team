@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 from logging.config import fileConfig
-
-from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from typing import TYPE_CHECKING
 
 from alembic import context
+from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from core.config import get_settings
 from core.persistence.models import Base
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Connection
 
 config = context.config
 

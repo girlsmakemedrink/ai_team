@@ -8,9 +8,12 @@ the contract so dependent code can be developed against it.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -56,18 +59,14 @@ class TargetRepo(ABC):
     async def checkout(self, branch: str, *, base: str | None = None) -> None: ...
 
     @abstractmethod
-    async def stage_and_commit(
-        self, paths: Sequence[str], message: str, author: str
-    ) -> str:
+    async def stage_and_commit(self, paths: Sequence[str], message: str, author: str) -> str:
         """Returns commit SHA."""
 
     @abstractmethod
     async def push(self, branch: str) -> None: ...
 
     @abstractmethod
-    async def open_pr(
-        self, *, head: str, base: str, title: str, body: str
-    ) -> PullRequest: ...
+    async def open_pr(self, *, head: str, base: str, title: str, body: str) -> PullRequest: ...
 
     @abstractmethod
     async def run_tests(self, command: str | None = None) -> TestRunResult: ...

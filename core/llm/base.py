@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 ModelTier = Literal["haiku", "sonnet", "opus"]
 

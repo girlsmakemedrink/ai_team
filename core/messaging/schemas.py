@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
@@ -12,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 SCHEMA_VERSION = "1.0"
 
 
-class AgentId(str, Enum):
+class AgentId(StrEnum):
     USER = "user"
     TEAM_LEAD = "team_lead"
     PRODUCT_MANAGER = "product_manager"
@@ -27,14 +28,14 @@ class AgentId(str, Enum):
     BROADCAST = "broadcast"  # recipient only
 
 
-class Priority(str, Enum):
+class Priority(StrEnum):
     P1 = "P1"  # critical incident / blocking
     P2 = "P2"  # active user task
     P3 = "P3"  # routine
     P4 = "P4"  # background / monitoring
 
 
-class MessageType(str, Enum):
+class MessageType(StrEnum):
     TASK_ASSIGNMENT = "task_assignment"
     TASK_REPORT = "task_report"
     QUESTION = "question"
@@ -46,7 +47,7 @@ class MessageType(str, Enum):
     HEARTBEAT = "heartbeat"
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     BLOCKED = "blocked"
@@ -120,9 +121,7 @@ class BroadcastPayload(_PayloadBase):
 class CheckpointDigestPayload(_PayloadBase):
     kind: Literal["checkpoint_digest"] = "checkpoint_digest"
     checkpoint_id: UUID
-    trigger: Literal[
-        "task_done", "manual", "scheduled", "iteration_end", "pre_review", "alert"
-    ]
+    trigger: Literal["task_done", "manual", "scheduled", "iteration_end", "pre_review", "alert"]
     iteration: int | None = None
     digest_markdown: str = Field(max_length=4_000)
     quota_used_pct: float = Field(ge=0.0, le=200.0)
@@ -177,7 +176,4 @@ class AgentMessage(BaseModel):
         data = self.model_dump(mode="json", exclude_none=False)
         if not include_signature:
             data.pop("hmac_signature", None)
-        # Sort keys for stable hashing across runs.
-        import json
-
         return json.dumps(data, sort_keys=True, separators=(",", ":")).encode()

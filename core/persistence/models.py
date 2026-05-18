@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PgUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 
 class Base(DeclarativeBase):
@@ -28,7 +32,7 @@ class AuditLog(Base):
     message_type: Mapped[str] = mapped_column(String(50), nullable=False)
     priority: Mapped[str] = mapped_column(String(5), nullable=False)
     iteration: Mapped[int | None] = mapped_column(Integer)
-    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     hmac_sig: Mapped[str] = mapped_column(String(128), nullable=False)
     prev_hash: Mapped[str | None] = mapped_column(String(128))
     hmac_hash: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -63,7 +67,7 @@ class FeedEvent(Base):
     message_type: Mapped[str] = mapped_column(String(50), nullable=False)
     priority: Mapped[str] = mapped_column(String(5), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
-    redacted_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    redacted_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
 
 class Task(Base):
@@ -74,8 +78,10 @@ class Task(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(),
-        onupdate=func.now(), nullable=False,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
     correlation_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)

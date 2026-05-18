@@ -11,7 +11,7 @@ import asyncio
 import json
 import os
 import time
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -24,6 +24,9 @@ from core.llm.base import (
     ToolUse,
     estimate_cost_cents,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _log = structlog.get_logger(__name__)
 
@@ -83,9 +86,12 @@ class ClaudeCodeHeadlessClient:
             self._binary,
             "-p",
             user_message,
-            "--output-format", "json",
-            "--model", model_id,
-            "--append-system-prompt", system_prompt,
+            "--output-format",
+            "json",
+            "--model",
+            model_id,
+            "--append-system-prompt",
+            system_prompt,
         ]
         if allowed_tools:
             cmd += ["--allowed-tools", ",".join(allowed_tools)]
@@ -120,28 +126,20 @@ class ClaudeCodeHeadlessClient:
             ) from e
 
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout_s
-            )
-        except asyncio.TimeoutError as e:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        except TimeoutError as e:
             proc.kill()
             await proc.wait()
-            raise LLMTimeoutError(
-                f"claude -p timed out after {timeout_s}s"
-            ) from e
+            raise LLMTimeoutError(f"claude -p timed out after {timeout_s}s") from e
 
         duration_ms = int((time.perf_counter() - start) * 1000)
 
         if proc.returncode != 0:
             err = stderr.decode(errors="replace")[:1000]
             log.error("llm.invoke.failed", returncode=proc.returncode, stderr=err)
-            raise LLMInvocationError(
-                f"claude -p exited {proc.returncode}: {err}"
-            )
+            raise LLMInvocationError(f"claude -p exited {proc.returncode}: {err}")
 
-        response = self._parse_response(
-            stdout, model_id=model_id, duration_ms=duration_ms
-        )
+        response = self._parse_response(stdout, model_id=model_id, duration_ms=duration_ms)
         log.info(
             "llm.invoke.ok",
             duration_ms=duration_ms,
@@ -168,9 +166,7 @@ class ClaudeCodeHeadlessClient:
             data: dict[str, Any] = json.loads(raw_stdout.decode())
         except json.JSONDecodeError as e:
             preview = raw_stdout[:500]
-            raise LLMInvocationError(
-                f"claude -p emitted non-JSON output: {preview!r}"
-            ) from e
+            raise LLMInvocationError(f"claude -p emitted non-JSON output: {preview!r}") from e
 
         if data.get("is_error", False):
             raise LLMInvocationError(
@@ -193,13 +189,15 @@ class ClaudeCodeHeadlessClient:
             if not isinstance(t, dict):
                 continue
             output_summary = t.get("output_summary")
-            tools_used.append(ToolUse(
-                name=str(t.get("name", "")),
-                input=t.get("input", {}) or {},
-                output_summary=(
-                    str(output_summary)[:500] if output_summary is not None else None
-                ),
-            ))
+            tools_used.append(
+                ToolUse(
+                    name=str(t.get("name", "")),
+                    input=t.get("input", {}) or {},
+                    output_summary=(
+                        str(output_summary)[:500] if output_summary is not None else None
+                    ),
+                )
+            )
 
         return LLMResponse(
             text=text,

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from redis.asyncio import Redis
 
 from core.messaging.schemas import AgentMessage, MessageType
 from core.security.redaction import redact_for_feed
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 _log = structlog.get_logger(__name__)
 
@@ -43,7 +45,7 @@ def make_feed_event(msg: AgentMessage) -> dict[str, Any]:
 
 
 class FeedPublisher:
-    def __init__(self, redis: Redis) -> None:
+    def __init__(self, redis: Redis[bytes]) -> None:
         self._redis = redis
 
     @classmethod
@@ -60,13 +62,13 @@ class FeedPublisher:
         return event
 
     async def close(self) -> None:
-        await self._redis.aclose()
+        await self._redis.aclose()  # type: ignore[attr-defined]
 
 
 class FeedSubscriber:
     """Async iterator over live feed_event dicts."""
 
-    def __init__(self, redis: Redis) -> None:
+    def __init__(self, redis: Redis[bytes]) -> None:
         self._redis = redis
 
     @classmethod
@@ -92,7 +94,7 @@ class FeedSubscriber:
                     yield parsed
         finally:
             await pubsub.unsubscribe(CHANNEL)
-            await pubsub.aclose()
+            await pubsub.aclose()  # type: ignore[attr-defined]
 
     async def close(self) -> None:
-        await self._redis.aclose()
+        await self._redis.aclose()  # type: ignore[attr-defined]

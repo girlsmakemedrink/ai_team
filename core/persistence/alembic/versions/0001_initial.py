@@ -7,12 +7,14 @@ Create Date: 2026-05-18
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
-from alembic import op
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 revision: str = "0001"
 down_revision: str | None = None
@@ -25,8 +27,10 @@ def upgrade() -> None:
         "audit_log",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column(
-            "timestamp", sa.DateTime(timezone=True),
-            server_default=sa.func.now(), nullable=False,
+            "timestamp",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
         ),
         sa.Column("correlation_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("sender", sa.String(50), nullable=False),
@@ -47,8 +51,10 @@ def upgrade() -> None:
         "audit_log_verifications",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column(
-            "verified_at", sa.DateTime(timezone=True),
-            server_default=sa.func.now(), nullable=False,
+            "verified_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
         ),
         sa.Column("window_start_id", sa.BigInteger(), nullable=False),
         sa.Column("window_end_id", sa.BigInteger(), nullable=False),
@@ -60,8 +66,10 @@ def upgrade() -> None:
         "feed_events",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column(
-            "timestamp", sa.DateTime(timezone=True),
-            server_default=sa.func.now(), nullable=False,
+            "timestamp",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
         ),
         sa.Column("message_id", postgresql.UUID(as_uuid=True), nullable=False, unique=True),
         sa.Column("correlation_id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -80,12 +88,16 @@ def upgrade() -> None:
         "tasks",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.func.now(), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True),
-            server_default=sa.func.now(), nullable=False,
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
         ),
         sa.Column("correlation_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("title", sa.String(200), nullable=False),
@@ -96,7 +108,8 @@ def upgrade() -> None:
         sa.Column("priority", sa.String(5), nullable=False, server_default="P3"),
         sa.Column("iteration", sa.Integer()),
         sa.Column(
-            "parent_task_id", postgresql.UUID(as_uuid=True),
+            "parent_task_id",
+            postgresql.UUID(as_uuid=True),
             sa.ForeignKey("tasks.id"),
         ),
     )
@@ -107,8 +120,10 @@ def upgrade() -> None:
         "checkpoints",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.func.now(), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
         ),
         sa.Column("trigger", sa.String(30), nullable=False),
         sa.Column("correlation_id", postgresql.UUID(as_uuid=True)),
@@ -123,8 +138,10 @@ def upgrade() -> None:
         "pending_reviews",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.func.now(), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
         ),
         sa.Column("correlation_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("requesting_agent", sa.String(50), nullable=False),

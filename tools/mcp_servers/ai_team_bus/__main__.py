@@ -56,23 +56,37 @@ async def _stdio_loop() -> None:  # pragma: no cover - integration tested separa
             continue
         method = msg.get("method")
         if method == "tools/list":
-            sys.stdout.write(json.dumps({
-                "jsonrpc": "2.0", "id": msg.get("id"),
-                "result": {"tools": _TOOL_LIST},
-            }) + "\n")
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": msg.get("id"),
+                        "result": {"tools": _TOOL_LIST},
+                    }
+                )
+                + "\n"
+            )
             sys.stdout.flush()
         elif method == "tools/call":
             tool = msg.get("params", {}).get("name", "")
-            sys.stdout.write(json.dumps({
-                "jsonrpc": "2.0", "id": msg.get("id"),
-                "result": {
-                    "content": [{
-                        "type": "text",
-                        "text": f"[stub] {tool} not implemented until Iteration 2",
-                    }],
-                    "isError": False,
-                },
-            }) + "\n")
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": msg.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"[stub] {tool} not implemented until Iteration 2",
+                                }
+                            ],
+                            "isError": False,
+                        },
+                    }
+                )
+                + "\n"
+            )
             sys.stdout.flush()
 
 

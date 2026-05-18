@@ -7,13 +7,15 @@ This is the contract every agent satisfies.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import structlog
 
-from core.llm.base import LLMClient, ModelTier
-from core.messaging.schemas import AgentId, AgentMessage
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from core.llm.base import LLMClient, ModelTier
+    from core.messaging.schemas import AgentId, AgentMessage
 
 _log = structlog.get_logger(__name__)
 
