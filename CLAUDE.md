@@ -32,8 +32,17 @@ the owner's Max 5x subscription. The adapter is in `core/llm/`:
 1. `claude -p --json-schema` returns the validated object in
    the **`structured_output`** field of the JSON output, NOT in `result`.
    `_parse_response` prefers `structured_output` when present.
-2. **Use `--session-id`, not `--resume`** for our logical sessions:
-   `--resume` errors on unknown IDs; `--session-id` is create-or-reuse.
+2. **Session flags are split, not interchangeable.** `--session-id <uuid>`
+   *creates* a session with that ID and errors on second use
+   ("Session ID is already in use"). `--resume <sid>` *resumes* an
+   existing session and errors on an unknown ID. The adapter
+   (`ClaudeCodeHeadlessClient`) uses `--session-id` on the first call
+   with a given ID and `--resume` on subsequent ones — that's what
+   gives us prompt caching across turns. Don't pass either flag from
+   agent code; pass `session_id=…` on `LLMClient.invoke()` and let the
+   adapter pick the right flag. (PR #3 set `--session-id` on every call
+   and broke caching silently — iter-2 Day-1A re-measurement caught
+   it; see `docs/iterations/iter_2_cache_report.md`.)
 3. `--max-budget-usd` is a real CLI flag — per-tier defaults in
    `DEFAULT_MAX_BUDGET_USD_PER_TIER` (haiku 0.10 / sonnet 0.50 / opus 2.00).
    These are **subscription-quota dollars** (counted against the Max 5x

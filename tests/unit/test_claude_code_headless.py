@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -92,6 +94,94 @@ def test_parse_response_raises_on_is_error(client: ClaudeCodeHeadlessClient) -> 
 def test_parse_response_raises_on_non_json(client: ClaudeCodeHeadlessClient) -> None:
     with pytest.raises(LLMInvocationError, match="non-JSON"):
         client._parse_response(b"not json at all", model_id="x", duration_ms=10)
+
+
+@pytest.mark.asyncio
+async def test_session_id_first_call_then_resume() -> None:
+    """First invoke with a session_id uses --session-id; subsequent uses --resume.
+
+    Pins the workaround for `claude -p`'s set-once `--session-id` flag:
+    reusing the same id twice fails with "Session ID is already in use"
+    unless we switch to `--resume` on the second call.
+    """
+    client = ClaudeCodeHeadlessClient()
+    captured_argvs: list[tuple[str, ...]] = []
+
+    class _FakeProc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            payload = {
+                "is_error": False,
+                "result": "ok",
+                "session_id": "sid-1",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+            return json.dumps(payload).encode(), b""
+
+    async def _fake_create(*cmd: str, **_: Any) -> _FakeProc:
+        captured_argvs.append(cmd)
+        return _FakeProc()
+
+    with patch(
+        "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+        new=AsyncMock(side_effect=_fake_create),
+    ):
+        await client.invoke(
+            system_prompt="sp", user_message="u1", model="haiku", session_id="sid-1"
+        )
+        await client.invoke(
+            system_prompt="sp", user_message="u2", model="haiku", session_id="sid-1"
+        )
+        await client.invoke(
+            system_prompt="sp", user_message="u3", model="haiku", session_id="sid-2"
+        )
+
+    assert "--session-id" in captured_argvs[0] and "--resume" not in captured_argvs[0]
+    assert "--resume" in captured_argvs[1] and "--session-id" not in captured_argvs[1]
+    assert "--session-id" in captured_argvs[2] and "--resume" not in captured_argvs[2]
+
+
+@pytest.mark.asyncio
+async def test_reset_session_unclaims_so_next_call_creates_again() -> None:
+    """reset_session() lets the same id be passed to --session-id again.
+
+    Behavioural check; the on-disk claude session is unchanged, but
+    callers signalling "forget this id" get the documented contract.
+    """
+    client = ClaudeCodeHeadlessClient()
+    captured_argvs: list[tuple[str, ...]] = []
+
+    class _FakeProc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return (
+                json.dumps(
+                    {
+                        "is_error": False,
+                        "result": "ok",
+                        "session_id": "sid",
+                        "usage": {"input_tokens": 1, "output_tokens": 1},
+                    }
+                ).encode(),
+                b"",
+            )
+
+    async def _fake_create(*cmd: str, **_: Any) -> _FakeProc:
+        captured_argvs.append(cmd)
+        return _FakeProc()
+
+    with patch(
+        "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+        new=AsyncMock(side_effect=_fake_create),
+    ):
+        await client.invoke(system_prompt="sp", user_message="u", session_id="sid")
+        await client.reset_session("sid")
+        await client.invoke(system_prompt="sp", user_message="u", session_id="sid")
+
+    assert "--session-id" in captured_argvs[0]
+    assert "--session-id" in captured_argvs[1]  # unclaimed, so first-call path again
 
 
 def test_parse_response_tokens_populated(client: ClaudeCodeHeadlessClient) -> None:

@@ -57,15 +57,29 @@ class ClaudeCodeHeadlessClient:
     - `--max-turns` is **not** an available flag. We rely on
       `--max-budget-usd` for hard budget enforcement and on the agent's
       own prompt to bound turns.
-    - Session resumption: `--resume <uuid>` reattaches to a previous
-      conversation. We use it for prompt caching across turns within
-      one `(agent, correlation)` tree.
+    - Session flags are split: `--session-id <uuid>` *creates* a session
+      with that ID (errors with "Session ID is already in use" if the
+      ID was previously used). `--resume <sid>` *reattaches* to an
+      existing session (errors if it doesn't exist). This client tracks
+      which IDs it has already created in this process and switches
+      automatically: first call → `--session-id`, subsequent calls with
+      the same ID → `--resume`. This is what gives us prompt caching
+      across turns. On process restart the tracking is lost; callers
+      must pass a fresh uuid (each AgentMessage already does, via its
+      own correlation_id).
     - Sessions persist under `~/.claude` unless `--no-session-persistence`
       is set. We let them persist for resumption.
     """
 
     def __init__(self, *, binary: str = "claude") -> None:
         self._binary = binary
+        # Session IDs this client has already passed via `--session-id`
+        # in the current process. Subsequent calls with the same id are
+        # rewritten to `--resume` so prompt caching works (see class
+        # docstring). Plain set is fine — every invoke() awaits its own
+        # subprocess and each AgentMessage carries a unique correlation_id,
+        # so two concurrent invokes won't race on the same session_id.
+        self._claimed_sessions: set[str] = set()
 
     async def invoke(
         self,
@@ -105,10 +119,11 @@ class ClaudeCodeHeadlessClient:
         if disallowed_tools:
             cmd += ["--disallowed-tools", ",".join(disallowed_tools)]
         if session_id:
-            # `--session-id` creates the session on first use and reuses it
-            # on subsequent calls. `--resume` would error on an unknown id,
-            # which breaks the first call of every (agent, correlation).
-            cmd += ["--session-id", session_id]
+            if session_id in self._claimed_sessions:
+                cmd += ["--resume", session_id]
+            else:
+                cmd += ["--session-id", session_id]
+                self._claimed_sessions.add(session_id)
         if mcp_config_path:
             cmd += ["--mcp-config", mcp_config_path]
         if json_schema is not None:
@@ -160,8 +175,16 @@ class ClaudeCodeHeadlessClient:
         return response
 
     async def reset_session(self, session_id: str) -> None:
-        """No-op: claude sessions are file-backed and expire naturally."""
-        _log.debug("llm.reset_session.noop", session_id=session_id)
+        """Forget our local claim on this session id.
+
+        The on-disk claude session is not deleted (it expires naturally).
+        After this call, the next invoke() with the same id would issue a
+        new `--session-id` and claude would reject it as already-in-use;
+        callers should generate a new uuid instead. Provided for tests
+        and as a potential unwind path on quota-exhausted errors.
+        """
+        self._claimed_sessions.discard(session_id)
+        _log.debug("llm.reset_session.unclaimed", session_id=session_id)
 
     # ----- internals -----
 
