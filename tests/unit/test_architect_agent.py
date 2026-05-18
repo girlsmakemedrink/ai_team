@@ -255,3 +255,9 @@ def test_allowed_tools_excludes_raw_write_edit_bash() -> None:
     forbidden = {"Write", "Edit", "Bash", "MultiEdit"}
     overlap = set(ArchitectAgent.allowed_tools) & forbidden
     assert not overlap, f"Architect must not have raw {overlap} access"
+
+
+def test_mcp_env_scopes_to_adr_dirs() -> None:
+    """Architect's MCP server spawns with path scope limited to docs/adr/
+    and docs/architecture.md per ADR-004."""
+    assert ArchitectAgent.mcp_env["AI_TEAM_PATH_PREFIXES"] == "docs/adr,docs/architecture.md"

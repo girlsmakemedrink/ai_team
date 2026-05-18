@@ -38,7 +38,8 @@ class Context:
         e = env if env is not None else dict(os.environ)
         root = e.get("AI_TEAM_REPO_ROOT") or os.getcwd()
         prefixes = e.get("AI_TEAM_PATH_PREFIXES")
-        scope = ScopeConfig.from_env(root, prefixes)
+        deny = e.get("AI_TEAM_PATH_DENY_PREFIXES")
+        scope = ScopeConfig.from_env(root, prefixes, deny)
         forbid_branch = e.get("AI_TEAM_FORBID_BRANCH_RE") or _DEFAULT_FORBID_BRANCH_RE.pattern
         # Propagate the per-target PR-base override into the commands
         # registry so `gh_pr_create` rejects bases consistent with this

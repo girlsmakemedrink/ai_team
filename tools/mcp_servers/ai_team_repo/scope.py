@@ -32,9 +32,18 @@ class ScopeError(ValueError):
 class ScopeConfig:
     root: Path  # absolute, resolved
     allowed_prefixes: tuple[str, ...]  # repo-relative; ("*",) means "anywhere under root"
+    # Denied prefixes apply EVEN WHEN allowed_prefixes is `*`. Lets us
+    # express ADR-004's Backend row: write anywhere in target_repo
+    # EXCEPT infra/ and .github/workflows/. Empty by default.
+    denied_prefixes: tuple[str, ...] = ()
 
     @classmethod
-    def from_env(cls, root: str | Path, prefixes_csv: str | None) -> ScopeConfig:
+    def from_env(
+        cls,
+        root: str | Path,
+        prefixes_csv: str | None,
+        deny_csv: str | None = None,
+    ) -> ScopeConfig:
         resolved_root = Path(root).expanduser().resolve(strict=True)
         if not resolved_root.is_dir():
             raise ScopeError(f"AI_TEAM_REPO_ROOT is not a directory: {resolved_root}")
@@ -42,7 +51,16 @@ class ScopeConfig:
             allowed: tuple[str, ...] = ("*",)
         else:
             allowed = tuple(p.strip().strip("/") for p in prefixes_csv.split(",") if p.strip())
-        return cls(root=resolved_root, allowed_prefixes=allowed)
+        denied: tuple[str, ...] = (
+            tuple(p.strip().strip("/") for p in deny_csv.split(",") if p.strip())
+            if deny_csv
+            else ()
+        )
+        return cls(
+            root=resolved_root,
+            allowed_prefixes=allowed,
+            denied_prefixes=denied,
+        )
 
 
 def resolve_in_scope(cfg: ScopeConfig, requested: str) -> Path:
@@ -53,6 +71,7 @@ def resolve_in_scope(cfg: ScopeConfig, requested: str) -> Path:
     - absolute path
     - path that resolves outside the repo root (e.g. `..`, symlink escape)
     - path that lies outside the configured allowed prefixes
+    - path that lies inside any configured denied prefix
     """
     if not requested or not requested.strip():
         raise ScopeError("empty path")
@@ -66,10 +85,11 @@ def resolve_in_scope(cfg: ScopeConfig, requested: str) -> Path:
     except ValueError as e:
         raise ScopeError(f"path resolves outside repo root: {requested!r} → {abs_candidate}") from e
 
-    if cfg.allowed_prefixes != ("*",):
-        rel_posix = rel.as_posix()
-        if not _matches_any_prefix(rel_posix, cfg.allowed_prefixes):
-            raise ScopeError(f"path outside allowed prefixes {cfg.allowed_prefixes}: {rel_posix!r}")
+    rel_posix = rel.as_posix()
+    if cfg.denied_prefixes and _matches_any_prefix(rel_posix, cfg.denied_prefixes):
+        raise ScopeError(f"path denied by prefix {cfg.denied_prefixes}: {rel_posix!r}")
+    if cfg.allowed_prefixes != ("*",) and not _matches_any_prefix(rel_posix, cfg.allowed_prefixes):
+        raise ScopeError(f"path outside allowed prefixes {cfg.allowed_prefixes}: {rel_posix!r}")
     return abs_candidate
 
 

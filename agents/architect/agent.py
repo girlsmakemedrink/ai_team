@@ -167,6 +167,10 @@ class ArchitectAgent(BaseAgent):
         "mcp__ai_team_tasks__request_human_review",
     )
     system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "architect.md"
+    # Per ADR-004 path-scope row.
+    mcp_env: ClassVar[dict[str, str]] = {
+        "AI_TEAM_PATH_PREFIXES": "docs/adr,docs/architecture.md",
+    }
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if not isinstance(incoming.payload, TaskAssignmentPayload):
@@ -228,6 +232,7 @@ class ArchitectAgent(BaseAgent):
             timeout_s=self.llm_timeout_s,
             max_turns=self.max_turns,
             json_schema=ADR_SCHEMA,
+            env=dict(self.mcp_env) if self.mcp_env else None,
         )
         return self.build_outputs(response, msg)
 

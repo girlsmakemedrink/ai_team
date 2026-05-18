@@ -90,6 +90,11 @@ def test_allowed_tools_no_raw_bash_or_write() -> None:
     assert not overlap
 
 
+def test_mcp_env_scopes_to_tests_dir() -> None:
+    """QA only writes to tests/ (regression cases). Enforced at MCP spawn."""
+    assert QAEngineerAgent.mcp_env["AI_TEAM_PATH_PREFIXES"] == "tests/"
+
+
 def test_allowed_tools_includes_run_shell() -> None:
     """QA's whole job is running tests — must have run_shell."""
     assert "mcp__ai_team_repo__run_shell" in QAEngineerAgent.allowed_tools

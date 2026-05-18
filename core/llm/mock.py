@@ -53,6 +53,7 @@ class MockLLMClient:
         max_turns: int = 8,
         json_schema: dict[str, Any] | None = None,
         max_budget_usd: float | None = None,
+        env: dict[str, str] | None = None,
     ) -> LLMResponse:
         key = self._make_key(system_prompt, user_message)
         self._calls.append({"key": key, "model": model})

@@ -84,6 +84,7 @@ class LLMClient(Protocol):
         max_turns: int = 8,
         json_schema: dict[str, Any] | None = None,
         max_budget_usd: float | None = None,
+        env: dict[str, str] | None = None,
     ) -> LLMResponse: ...
 
     async def reset_session(self, session_id: str) -> None: ...

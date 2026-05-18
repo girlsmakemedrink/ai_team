@@ -74,6 +74,13 @@ class BackendDeveloperAgent(BaseAgent):
         "mcp__ai_team_tasks__request_human_review",
     )
     system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "backend_developer.md"
+    # Per ADR-004 path-scope row: writes anywhere in target_repo EXCEPT
+    # infra/ and .github/workflows/ (DevOps territory). `*` allow plus
+    # explicit denylist via scope.py's AI_TEAM_PATH_DENY_PREFIXES.
+    mcp_env: ClassVar[dict[str, str]] = {
+        "AI_TEAM_PATH_PREFIXES": "*",
+        "AI_TEAM_PATH_DENY_PREFIXES": "infra/,.github/workflows/",
+    }
     # Multi-step workflow (read spec → write code → run tests → PR) needs
     # a longer leash than the default; bump to give 6+ minutes per turn.
     llm_timeout_s: ClassVar[int] = 600
@@ -131,6 +138,7 @@ class BackendDeveloperAgent(BaseAgent):
             timeout_s=self.llm_timeout_s,
             max_turns=self.max_turns,
             json_schema=BACKEND_REPORT_SCHEMA,
+            env=dict(self.mcp_env) if self.mcp_env else None,
         )
         return self.build_outputs(response, msg)
 
