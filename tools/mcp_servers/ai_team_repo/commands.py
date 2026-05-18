@@ -106,7 +106,23 @@ def _validate_git_push_feature(args: Sequence[str]) -> None:
         )
 
 
-_FORBIDDEN_PR_BASE_RE = re.compile(r"^(main|master|release/.*)$")
+# Mutable so per-target-repo configuration can override (see `set_forbidden_pr_base_re`).
+# Default matches ADR-009: agents never PR-into main/master/release/*. The ai_team
+# self-repo exception (PRs may target main) is set via the env at server startup,
+# not by changing this default — keeps the safer behaviour for unknown targets.
+_FORBIDDEN_PR_BASE_RE: re.Pattern[str] = re.compile(r"^(main|master|release/.*)$")
+
+
+def set_forbidden_pr_base_re(pattern: str) -> None:
+    """Replace the regex used by `gh_pr_create` to reject PR base branches.
+
+    Called by `handlers.Context.from_env` so the MCP server reads
+    `AI_TEAM_FORBID_PR_BASE_RE` once at startup. The ai_team self-repo
+    spawn passes `^(master|release/.*)$` (drops `main` from the
+    forbidden set); other targets keep the default.
+    """
+    global _FORBIDDEN_PR_BASE_RE  # noqa: PLW0603 - server-startup config; module-singleton is intentional
+    _FORBIDDEN_PR_BASE_RE = re.compile(pattern)
 
 
 def _validate_gh_pr_create(args: Sequence[str]) -> None:

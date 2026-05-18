@@ -18,6 +18,7 @@ from typing import Any
 from tools.mcp_servers.ai_team_repo.commands import (
     CommandRejected,
     resolve_command,
+    set_forbidden_pr_base_re,
 )
 from tools.mcp_servers.ai_team_repo.scope import ScopeConfig, ScopeError, resolve_in_scope
 
@@ -37,11 +38,18 @@ class Context:
         e = env if env is not None else dict(os.environ)
         root = e.get("AI_TEAM_REPO_ROOT") or os.getcwd()
         prefixes = e.get("AI_TEAM_PATH_PREFIXES")
-        scope = ScopeConfig.from_env(root, prefixes)
-        forbid = e.get("AI_TEAM_FORBID_BRANCH_RE") or _DEFAULT_FORBID_BRANCH_RE.pattern
+        deny = e.get("AI_TEAM_PATH_DENY_PREFIXES")
+        scope = ScopeConfig.from_env(root, prefixes, deny)
+        forbid_branch = e.get("AI_TEAM_FORBID_BRANCH_RE") or _DEFAULT_FORBID_BRANCH_RE.pattern
+        # Propagate the per-target PR-base override into the commands
+        # registry so `gh_pr_create` rejects bases consistent with this
+        # server's scope (e.g. ai_team self-repo allows main, others don't).
+        forbid_pr_base = e.get("AI_TEAM_FORBID_PR_BASE_RE")
+        if forbid_pr_base:
+            set_forbidden_pr_base_re(forbid_pr_base)
         return cls(
             scope=scope,
-            forbid_branch_re=re.compile(forbid),
+            forbid_branch_re=re.compile(forbid_branch),
             default_pr_base=e.get("AI_TEAM_PR_BASE", "main"),
         )
 

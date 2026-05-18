@@ -58,6 +58,12 @@ class BaseAgent(ABC):
     max_turns: ClassVar[int] = 8
     llm_timeout_s: ClassVar[int] = 120
     max_concurrent: ClassVar[int] = 1  # serial per agent by default
+    # Per-role env merged into claude -p's subprocess env (via LLMClient.invoke
+    # env=...). Typically the role-specific AI_TEAM_PATH_PREFIXES / DENY /
+    # AI_TEAM_FORBID_PR_BASE_RE so the MCP server spawns with the agent's
+    # least-privilege scope. Empty dict = inherit dispatcher's global env
+    # (the current iter-2 demo wiring).
+    mcp_env: ClassVar[dict[str, str]] = {}
 
     def __init__(self, *, llm: LLMClient) -> None:
         self._llm = llm
@@ -121,6 +127,7 @@ class BaseAgent(ABC):
                     session_id=session_key,
                     timeout_s=self.llm_timeout_s,
                     max_turns=self.max_turns,
+                    env=dict(self.mcp_env) if self.mcp_env else None,
                 )
         # Unreachable: AsyncRetrying with reraise=True always returns or raises.
         raise RuntimeError("unreachable")

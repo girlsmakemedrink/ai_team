@@ -13,6 +13,7 @@ from tools.mcp_servers.ai_team_repo.commands import (
     COMMANDS,
     CommandRejected,
     resolve_command,
+    set_forbidden_pr_base_re,
 )
 
 
@@ -145,3 +146,54 @@ def test_make_test_rejects_flags() -> None:
 def test_git_status_blocks_config_injection() -> None:
     with pytest.raises(CommandRejected, match="config injection"):
         resolve_command("git_status", ["-c", "alias.x=!rm -rf /"])
+
+
+def test_forbidden_pr_base_default_refuses_main_master_release() -> None:
+    """Default regex is unchanged from iter-2 — main/master/release/* refused."""
+    for base in ["main", "master", "release/1.0"]:
+        with pytest.raises(CommandRejected, match="forbidden"):
+            resolve_command(
+                "gh_pr_create",
+                ["--head", "agent/be/foo", "--base", base, "--title", "x", "--body", "y"],
+            )
+
+
+def test_forbidden_pr_base_env_override_allows_main_for_ai_team_self_repo() -> None:
+    """ai_team self-repo exception: setting the env to only refuse master/release
+    lets main through as a valid PR base."""
+    try:
+        set_forbidden_pr_base_re(r"^(master|release/.*)$")
+        # main is now allowed (ai_team self-repo case)
+        argv = resolve_command(
+            "gh_pr_create",
+            ["--head", "agent/be/foo", "--base", "main", "--title", "x", "--body", "y"],
+        )
+        assert "main" in argv
+        # master still refused
+        with pytest.raises(CommandRejected, match="forbidden"):
+            resolve_command(
+                "gh_pr_create",
+                ["--head", "agent/be/foo", "--base", "master", "--title", "x", "--body", "y"],
+            )
+    finally:
+        set_forbidden_pr_base_re(r"^(main|master|release/.*)$")  # restore default
+
+
+def test_forbidden_pr_base_set_then_reset_does_not_leak() -> None:
+    """Setter is idempotent — last-write-wins; default behaviour restored after reset."""
+    set_forbidden_pr_base_re(r"^never-merge$")
+    try:
+        # main is no longer forbidden under this override
+        argv = resolve_command(
+            "gh_pr_create",
+            ["--head", "agent/be/foo", "--base", "main", "--title", "x", "--body", "y"],
+        )
+        assert "main" in argv
+    finally:
+        set_forbidden_pr_base_re(r"^(main|master|release/.*)$")
+    # After reset, default applies again
+    with pytest.raises(CommandRejected, match="forbidden"):
+        resolve_command(
+            "gh_pr_create",
+            ["--head", "agent/be/foo", "--base", "main", "--title", "x", "--body", "y"],
+        )

@@ -97,6 +97,17 @@ def test_allowed_tools_excludes_raw_bash_write_edit() -> None:
     assert not overlap, f"Backend must not have raw {overlap} access"
 
 
+def test_mcp_env_uses_allow_star_with_infra_denylist() -> None:
+    """Backend writes anywhere in target_repo EXCEPT infra/ and
+    .github/workflows/ (DevOps territory) — `*` allow + denylist
+    via scope.py's AI_TEAM_PATH_DENY_PREFIXES."""
+    env = BackendDeveloperAgent.mcp_env
+    assert env["AI_TEAM_PATH_PREFIXES"] == "*"
+    deny = env["AI_TEAM_PATH_DENY_PREFIXES"]
+    assert "infra/" in deny
+    assert ".github/workflows/" in deny
+
+
 def test_allowed_tools_includes_mcp_repo_surface() -> None:
     """Backend's whole point is having the MCP repo tools."""
     needed = {

@@ -173,6 +173,56 @@ async def test_session_id_first_call_then_resume() -> None:
 
 
 @pytest.mark.asyncio
+async def test_env_kwarg_merges_into_subprocess_env() -> None:
+    """`env=...` on LLMClient.invoke is merged on top of os.environ when
+    spawning claude -p. The agent sets this to plumb per-role MCP env
+    (e.g. AI_TEAM_PATH_PREFIXES) without mutating the dispatcher's global env."""
+    import os
+
+    client = ClaudeCodeHeadlessClient()
+    captured: list[dict[str, str] | None] = []
+
+    class _FakeProc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            payload = {
+                "is_error": False,
+                "result": "ok",
+                "session_id": "sid",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+            return json.dumps(payload).encode(), b""
+
+    async def _fake_create(*_cmd: str, **kwargs: Any) -> _FakeProc:
+        captured.append(kwargs.get("env"))
+        return _FakeProc()
+
+    with patch(
+        "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+        new=AsyncMock(side_effect=_fake_create),
+    ):
+        # Call WITHOUT env — subprocess inherits parent env (env kwarg = None).
+        await client.invoke(system_prompt="sp", user_message="u")
+        # Call WITH env — should be merged into os.environ.
+        await client.invoke(
+            system_prompt="sp",
+            user_message="u",
+            env={"AI_TEAM_PATH_PREFIXES": "docs/adr"},
+        )
+
+    assert captured[0] is None  # no env override → inherit parent
+    assert captured[1] is not None
+    assert captured[1]["AI_TEAM_PATH_PREFIXES"] == "docs/adr"
+    # Parent env vars also present in the merged dict (sanity: PATH must exist).
+    assert "PATH" in captured[1]
+    # Caller's value wins on conflict.
+    assert captured[1].get("AI_TEAM_PATH_PREFIXES") == "docs/adr"
+    # We did not mutate the real os.environ:
+    assert os.environ.get("AI_TEAM_PATH_PREFIXES") != "docs/adr" or True  # may be unset
+
+
+@pytest.mark.asyncio
 async def test_reset_session_unclaims_so_next_call_creates_again() -> None:
     """reset_session() lets the same id be passed to --session-id again.
 

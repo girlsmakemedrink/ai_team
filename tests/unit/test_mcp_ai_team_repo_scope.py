@@ -134,3 +134,58 @@ def test_scope_uses_absolute_root_even_if_relative_input(
     cfg = ScopeConfig.from_env(repo.name, None)
     assert os.path.isabs(str(cfg.root))
     assert cfg.root == repo.resolve()
+
+
+# ----- denylist (iter-2b 1B) -----
+
+
+def test_denylist_refuses_path_under_denied_prefix(repo: Path) -> None:
+    """`denied_prefixes` blocks paths under denied roots even when
+    allowed_prefixes is `*`. Per ADR-004's Backend row: write anywhere
+    EXCEPT infra/ and .github/workflows/."""
+    (repo / "infra").mkdir()
+    (repo / "infra" / "docker-compose.yml").write_text("")
+    cfg = ScopeConfig(
+        root=repo.resolve(),
+        allowed_prefixes=("*",),
+        denied_prefixes=("infra",),
+    )
+    with pytest.raises(ScopeError, match="denied"):
+        resolve_in_scope(cfg, "infra/docker-compose.yml")
+
+
+def test_denylist_allows_paths_under_undenied_dir(repo: Path) -> None:
+    cfg = ScopeConfig(
+        root=repo.resolve(),
+        allowed_prefixes=("*",),
+        denied_prefixes=("infra", ".github/workflows"),
+    )
+    p = resolve_in_scope(cfg, "docs/adr/0010-foo.md")
+    assert p.parts[-3:] == ("docs", "adr", "0010-foo.md")
+
+
+def test_denylist_exact_prefix_match_is_denied(repo: Path) -> None:
+    """Writing the prefix itself (e.g. `Makefile` as a file) is denied —
+    same rule as the allowlist's exact-match handling."""
+    cfg = ScopeConfig(
+        root=repo.resolve(),
+        allowed_prefixes=("*",),
+        denied_prefixes=("Makefile",),
+    )
+    (repo / "Makefile").write_text("")
+    with pytest.raises(ScopeError, match="denied"):
+        resolve_in_scope(cfg, "Makefile")
+
+
+def test_scope_config_from_env_parses_denylist(repo: Path) -> None:
+    cfg = ScopeConfig.from_env(
+        repo,
+        prefixes_csv="*",
+        deny_csv="infra/,.github/workflows/",
+    )
+    assert cfg.denied_prefixes == ("infra", ".github/workflows")
+
+
+def test_denylist_defaults_to_empty_tuple(repo: Path) -> None:
+    cfg = ScopeConfig.from_env(repo, prefixes_csv="*", deny_csv=None)
+    assert cfg.denied_prefixes == ()

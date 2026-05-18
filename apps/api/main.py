@@ -30,6 +30,9 @@ from sse_starlette.sse import EventSourceResponse
 
 from agents.architect import ArchitectAgent
 from agents.backend_developer import BackendDeveloperAgent
+from agents.designer import DesignerAgent
+from agents.devops import DevOpsAgent
+from agents.market_researcher import MarketResearcherAgent
 from agents.product_manager import ProductManagerAgent
 from agents.qa_engineer import QAEngineerAgent
 from agents.team_lead import TeamLeadAgent
@@ -80,6 +83,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         AgentId.ARCHITECT: ArchitectAgent(llm=llm),
         AgentId.BACKEND_DEVELOPER: BackendDeveloperAgent(llm=llm),
         AgentId.QA_ENGINEER: QAEngineerAgent(llm=llm),
+        AgentId.DESIGNER: DesignerAgent(llm=llm),
+        AgentId.DEVOPS: DevOpsAgent(llm=llm),
+        AgentId.MARKET_RESEARCHER: MarketResearcherAgent(llm=llm),
     }
     dispatcher = AgentDispatcher(
         bus=bus,

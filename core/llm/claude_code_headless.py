@@ -95,6 +95,7 @@ class ClaudeCodeHeadlessClient:
         max_turns: int = 8,  # kept for protocol compat; not passed to CLI
         json_schema: dict[str, Any] | None = None,
         max_budget_usd: float | None = None,
+        env: dict[str, str] | None = None,
     ) -> LLMResponse:
         model_id = _resolve_model_id(model)
         effective_budget = (
@@ -144,11 +145,18 @@ class ClaudeCodeHeadlessClient:
         log.info("llm.invoke.start")
         start = time.perf_counter()
 
+        # When caller passes env=..., merge on top of os.environ rather than
+        # replace it (subprocess.Popen would otherwise drop PATH, HOME, etc.).
+        # When env is None we let the subprocess inherit the parent's env
+        # unchanged (no env kwarg to create_subprocess_exec).
+        effective_env = {**os.environ, **env} if env else None
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=effective_env,
             )
         except FileNotFoundError as e:
             raise LLMInvocationError(
