@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: ai_team
+          POSTGRES_PASSWORD: changeme-ci
+          POSTGRES_DB: ai_team
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ai_team -d ai_team"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      POSTGRES_DSN: postgresql+asyncpg://ai_team:changeme-ci@localhost:5432/ai_team
+      REDIS_URL: redis://localhost:6379/0
+      OWNER_TOKEN: ci-token-32-chars-aaaaaaaaaaaaaaaaa
+      HMAC_SECRET: ci-secret-32-chars-bbbbbbbbbbbbbbbb
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: latest
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: uv sync --all-extras --frozen || uv sync --all-extras
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy .
+
+      - name: Bandit (gate on high-severity only, per ADR-005)
+        run: uv run bandit -c pyproject.toml -r apps agents core tools --severity-level high
+
+      - name: Pytest (mocked LLM only)
+        run: uv run pytest --cov --cov-report=xml --cov-report=term -m "not real_llm"
+
+      - name: Diff-cover on changed lines
+        if: github.event_name == 'pull_request'
+        # Foundation PR exception: 60 % during Iteration 0 (lots of scaffold
+        # without runtime to exercise). Raise back to 80 % once Iteration 1
+        # adds testcontainers integration tests. See iter_0_retro.md.
+        run: |
+          uv run diff-cover coverage.xml \
+            --compare-branch=origin/${{ github.base_ref }} \
+            --fail-under=60
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  commitlint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v6
+        with:
+          configFile: .commitlintrc.yml
