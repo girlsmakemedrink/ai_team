@@ -1,0 +1,126 @@
+[project]
+name = "ai-team"
+version = "0.1.0"
+description = "Multi-agent AI development team framework"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Kirill Terskih", email = "ter.kir777@gmail.com" }]
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.13",
+    "asyncpg>=0.30",
+    "redis[hiredis]>=5.2",
+    "structlog>=24.4",
+    "prometheus-client>=0.21",
+    "httpx>=0.27",
+    "click>=8.1",
+    "rich>=13.9",
+    "python-dotenv>=1.0",
+    "cryptography>=44.0",
+    "tenacity>=9.0",
+    "sse-starlette>=2.1",
+    "anyio>=4.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "pytest-mock>=3.14",
+    "diff-cover>=9.2",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "bandit[toml]>=1.8",
+    "types-redis",
+    "testcontainers[postgres,redis]>=4.8",
+    "respx>=0.21",
+    "pre-commit>=4.0",
+]
+
+[project.scripts]
+ai-team = "apps.cli.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["apps", "agents", "core", "tools"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pycodestyle / pyflakes
+    "I",             # isort
+    "B",             # bugbear
+    "UP",            # pyupgrade
+    "RUF",           # ruff
+    "ASYNC",         # async correctness
+    "S",             # bandit-like security
+    "C4",            # comprehensions
+    "SIM",           # simplify
+    "TCH",           # type-checking imports
+    "PL",            # pylint subset
+]
+ignore = [
+    "S101",          # allow assert (used in tests)
+    "S104",          # allow 0.0.0.0 bind (dev/docker)
+    "PLR0913",       # too many args — Pydantic / FastAPI often need it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = ["S", "PLR2004"]
+"scripts/**/*" = ["T201"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = ["^alembic/versions/", "^build/", "^dist/"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "smoke: smoke tests (<=5min, critical path)",
+    "regression: full regression suite (nightly)",
+    "real_llm: hits real Claude API via subscription",
+    "integration: requires redis+postgres",
+    "e2e: end-to-end via Playwright",
+]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["apps", "agents", "core", "tools"]
+omit = ["*/migrations/*", "*/alembic/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", "scripts"]
+skips = ["B101"]  # allow assert
