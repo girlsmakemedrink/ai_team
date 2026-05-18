@@ -39,5 +39,3 @@ def test_unknown_backend_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AI_TEAM_LLM_BACKEND", "nonsense")
     with pytest.raises(ValueError, match="Unknown AI_TEAM_LLM_BACKEND"):
         make_llm_client()
-
-
