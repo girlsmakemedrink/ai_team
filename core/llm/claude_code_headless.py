@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from core.llm.base import (
+    DEFAULT_MAX_BUDGET_USD_PER_TIER,
     LLMInvocationError,
     LLMResponse,
     LLMTimeoutError,
@@ -78,9 +79,13 @@ class ClaudeCodeHeadlessClient:
         mcp_config_path: str | None = None,
         timeout_s: int = 120,
         max_turns: int = 8,  # kept for protocol compat; not passed to CLI
+        json_schema: dict[str, Any] | None = None,
         max_budget_usd: float | None = None,
     ) -> LLMResponse:
         model_id = _resolve_model_id(model)
+        effective_budget = (
+            max_budget_usd if max_budget_usd is not None else DEFAULT_MAX_BUDGET_USD_PER_TIER[model]
+        )
 
         cmd: list[str] = [
             self._binary,
@@ -92,6 +97,8 @@ class ClaudeCodeHeadlessClient:
             model_id,
             "--append-system-prompt",
             system_prompt,
+            "--max-budget-usd",
+            f"{effective_budget:.4f}",
         ]
         if allowed_tools:
             cmd += ["--allowed-tools", ",".join(allowed_tools)]
@@ -101,8 +108,8 @@ class ClaudeCodeHeadlessClient:
             cmd += ["--resume", session_id]
         if mcp_config_path:
             cmd += ["--mcp-config", mcp_config_path]
-        if max_budget_usd is not None:
-            cmd += ["--max-budget-usd", f"{max_budget_usd:.4f}"]
+        if json_schema is not None:
+            cmd += ["--json-schema", json.dumps(json_schema, separators=(",", ":"))]
 
         log = _log.bind(
             model=model_id,

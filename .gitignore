@@ -55,6 +55,10 @@ out/
 # Smoke test artifacts
 smoke_report*.json
 
+# PM agent runtime artifacts (per-correlation user stories)
+docs/backlog/*.md
+!docs/backlog/.gitkeep
+
 # Misc
 *.pid
 *.bak

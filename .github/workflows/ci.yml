@@ -75,13 +75,10 @@ jobs:
 
       - name: Diff-cover on changed lines
         if: github.event_name == 'pull_request'
-        # Foundation PR exception: 60 % during Iteration 0 (lots of scaffold
-        # without runtime to exercise). Raise back to 80 % once Iteration 1
-        # adds testcontainers integration tests. See iter_0_retro.md.
         run: |
           uv run diff-cover coverage.xml \
             --compare-branch=origin/${{ github.base_ref }} \
-            --fail-under=60
+            --fail-under=80
 
       - name: Upload coverage
         if: always()
