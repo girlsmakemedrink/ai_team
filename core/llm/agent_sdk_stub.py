@@ -11,7 +11,7 @@ Tracking: revisit by 2026-09-01 or sooner if Anthropic announces.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -32,6 +32,8 @@ class ClaudeAgentSDKClient:
         mcp_config_path: str | None = None,
         timeout_s: int = 120,
         max_turns: int = 8,
+        json_schema: dict[str, Any] | None = None,
+        max_budget_usd: float | None = None,
     ) -> LLMResponse:
         raise NotImplementedError(
             "Claude Agent SDK backend pending subscription-auth support; "

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from collections.abc import Sequence  # noqa: TC003  runtime Protocol signature
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 ModelTier = Literal["haiku", "sonnet", "opus"]
 
@@ -79,6 +77,8 @@ class LLMClient(Protocol):
         mcp_config_path: str | None = None,
         timeout_s: int = 120,
         max_turns: int = 8,
+        json_schema: dict[str, Any] | None = None,
+        max_budget_usd: float | None = None,
     ) -> LLMResponse: ...
 
     async def reset_session(self, session_id: str) -> None: ...
@@ -92,6 +92,17 @@ PRICE_TABLE_CENTS_PER_MTOK: dict[str, tuple[int, int]] = {
     "claude-haiku-4-5": (80, 400),
     "claude-sonnet-4-6": (300, 1500),
     "claude-opus-4-7": (1500, 7500),
+}
+
+
+# Per-tier max-budget-usd defaults applied by ClaudeCodeHeadlessClient
+# when the caller doesn't pass max_budget_usd explicitly. See ADR-006.
+# Tight defaults protect runaway loops; agents that need more should
+# override per-call.
+DEFAULT_MAX_BUDGET_USD_PER_TIER: dict[ModelTier, float] = {
+    "haiku": 0.10,
+    "sonnet": 0.50,
+    "opus": 2.00,
 }
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from core.llm.base import (
     LLMInvocationError,
@@ -51,6 +51,8 @@ class MockLLMClient:
         mcp_config_path: str | None = None,
         timeout_s: int = 120,
         max_turns: int = 8,
+        json_schema: dict[str, Any] | None = None,
+        max_budget_usd: float | None = None,
     ) -> LLMResponse:
         key = self._make_key(system_prompt, user_message)
         self._calls.append({"key": key, "model": model})
