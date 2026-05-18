@@ -105,7 +105,10 @@ class ClaudeCodeHeadlessClient:
         if disallowed_tools:
             cmd += ["--disallowed-tools", ",".join(disallowed_tools)]
         if session_id:
-            cmd += ["--resume", session_id]
+            # `--session-id` creates the session on first use and reuses it
+            # on subsequent calls. `--resume` would error on an unknown id,
+            # which breaks the first call of every (agent, correlation).
+            cmd += ["--session-id", session_id]
         if mcp_config_path:
             cmd += ["--mcp-config", mcp_config_path]
         if json_schema is not None:
@@ -189,7 +192,14 @@ class ClaudeCodeHeadlessClient:
         )
 
         text: str = str(data.get("result", ""))
-        structured = self._maybe_parse_json(text)
+        # When --json-schema was passed, the validated object lives in
+        # `structured_output`. Otherwise try to extract JSON from the
+        # natural-language `result`.
+        raw_structured = data.get("structured_output")
+        if isinstance(raw_structured, dict):
+            structured: dict[str, Any] | None = raw_structured
+        else:
+            structured = self._maybe_parse_json(text)
 
         tools_used: list[ToolUse] = []
         for t in data.get("tools_used", []):
