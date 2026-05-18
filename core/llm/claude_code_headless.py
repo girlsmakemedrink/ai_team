@@ -171,6 +171,8 @@ class ClaudeCodeHeadlessClient:
             tokens_in=response.tokens.input,
             tokens_out=response.tokens.output,
             cost_cents=response.cost_estimate_cents,
+            schema_requested=json_schema is not None,
+            validated_against_schema=response.validated_against_schema,
         )
         return response
 
@@ -217,12 +219,16 @@ class ClaudeCodeHeadlessClient:
         text: str = str(data.get("result", ""))
         # When --json-schema was passed, the validated object lives in
         # `structured_output`. Otherwise try to extract JSON from the
-        # natural-language `result`.
+        # natural-language `result`. `validated_against_schema` records
+        # which branch we took so callers (and the feed digest) can see
+        # per-turn schema conformance without re-parsing the raw blob.
         raw_structured = data.get("structured_output")
         if isinstance(raw_structured, dict):
             structured: dict[str, Any] | None = raw_structured
+            validated_against_schema = True
         else:
             structured = self._maybe_parse_json(text)
+            validated_against_schema = False
 
         tools_used: list[ToolUse] = []
         for t in data.get("tools_used", []):
@@ -247,6 +253,7 @@ class ClaudeCodeHeadlessClient:
             tokens=tokens,
             cost_estimate_cents=estimate_cost_cents(model_id, tokens),
             duration_ms=duration_ms,
+            validated_against_schema=validated_against_schema,
             raw=data,
         )
 

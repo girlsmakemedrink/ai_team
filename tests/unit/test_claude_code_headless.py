@@ -47,6 +47,36 @@ def test_parse_response_with_structured_output_from_json_schema(
     assert resp.structured["summary"] == "Decomposed."
     assert resp.structured["subtasks"][0]["recipient"] == "product_manager"
     assert resp.session_id == "s-1"
+    assert resp.validated_against_schema is True
+
+
+def test_validated_against_schema_false_on_text_json_fallback(
+    client: ClaudeCodeHeadlessClient,
+) -> None:
+    """Parsing JSON out of free-form `result` text is NOT a schema validation."""
+    payload = {
+        "is_error": False,
+        "result": '{"summary":"ok","subtasks":[]}',
+        "session_id": "s-fb",
+        "usage": {"input_tokens": 1, "output_tokens": 2},
+    }
+    resp = client._parse_response(_stdout(payload), model_id="claude-haiku-4-5", duration_ms=10)
+    assert resp.structured == {"summary": "ok", "subtasks": []}
+    assert resp.validated_against_schema is False
+
+
+def test_validated_against_schema_false_on_plain_text(
+    client: ClaudeCodeHeadlessClient,
+) -> None:
+    payload = {
+        "is_error": False,
+        "result": "I cannot help with that.",
+        "session_id": "s-plain",
+        "usage": {"input_tokens": 1, "output_tokens": 2},
+    }
+    resp = client._parse_response(_stdout(payload), model_id="claude-haiku-4-5", duration_ms=10)
+    assert resp.structured is None
+    assert resp.validated_against_schema is False
 
 
 def test_parse_response_falls_back_to_text_json(

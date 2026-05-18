@@ -52,6 +52,11 @@ class LLMResponse(BaseModel):
     tokens: TokensUsage
     cost_estimate_cents: int = 0
     duration_ms: int
+    # True when `claude -p` populated `structured_output` (i.e. the model's
+    # response satisfied --json-schema). False when we fell back to parsing
+    # JSON out of free-form text, or when no schema was requested. Lets the
+    # feed digest per-turn schema conformance without re-parsing the raw blob.
+    validated_against_schema: bool = False
     raw: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
