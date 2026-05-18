@@ -22,3 +22,11 @@ rules:
   # drop title-case policing.
   subject-case:
     - 0
+  # Footers (trailers like `Co-Authored-By:`, `Closes:`) shouldn't be
+  # length-capped — `Co-Authored-By: <Name> <long-email>` legitimately
+  # exceeds 100 chars. Also, the conventional-commits parser sometimes
+  # absorbs the last body paragraph into "footer" when a trailer
+  # follows, which makes the body-max-line-length 100-char warning
+  # surface as a footer-max-line-length error. Disable.
+  footer-max-line-length:
+    - 0
