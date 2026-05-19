@@ -17,6 +17,7 @@ from agents.team_lead.agent import _AUTO_ROUTED_MARKER
 from core.messaging.schemas import (
     AgentId,
     AgentMessage,
+    BroadcastPayload,
     MessageType,
     Priority,
     TaskAssignmentPayload,
@@ -239,8 +240,9 @@ def test_build_outputs_emits_one_message_per_subtask() -> None:
     }
     outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
 
-    assert len(outputs) == 2
-    arch_out, be_out = outputs
+    assignments = [o for o in outputs if o.message_type == MessageType.TASK_ASSIGNMENT]
+    assert len(assignments) == 2
+    arch_out, be_out = assignments
     assert arch_out.recipient == AgentId.ARCHITECT
     assert be_out.recipient == AgentId.BACKEND_DEVELOPER
 
@@ -264,7 +266,8 @@ def test_build_outputs_stamps_subtask_id_and_parent_task_id() -> None:
     outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
     assert isinstance(incoming.payload, TaskAssignmentPayload)
 
-    arch = outputs[0]
+    assignments = [o for o in outputs if o.message_type == MessageType.TASK_ASSIGNMENT]
+    arch = assignments[0]
     assert arch.metadata.get("subtask_id") == "arch"
     assert arch.metadata.get("parent_task_id") == str(incoming.payload.task_id)
 
@@ -294,16 +297,18 @@ def test_build_outputs_resolves_depends_on_to_predecessor_uuids() -> None:
         ],
     }
     outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
-    arch_payload = outputs[0].payload
-    be_payload = outputs[1].payload
+    assignments = [o for o in outputs if o.message_type == MessageType.TASK_ASSIGNMENT]
+    arch_msg, be_msg = assignments
+    arch_payload = arch_msg.payload
+    be_payload = be_msg.payload
     assert isinstance(arch_payload, TaskAssignmentPayload)
     assert isinstance(be_payload, TaskAssignmentPayload)
 
     # be.metadata["depends_on"] is a list of UUID strings matching arch's
     # payload.task_id (not arch's message_id and not arch's slug).
-    assert outputs[1].metadata.get("depends_on") == [str(arch_payload.task_id)]
+    assert be_msg.metadata.get("depends_on") == [str(arch_payload.task_id)]
     # arch has no predecessors → empty list (NOT missing key).
-    assert outputs[0].metadata.get("depends_on") == []
+    assert arch_msg.metadata.get("depends_on") == []
 
 
 def test_build_outputs_handles_subtasks_missing_depends_on_key() -> None:
@@ -323,7 +328,8 @@ def test_build_outputs_handles_subtasks_missing_depends_on_key() -> None:
         ],
     }
     outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
-    assert outputs[0].metadata.get("depends_on") == []
+    assignments = [o for o in outputs if o.message_type == MessageType.TASK_ASSIGNMENT]
+    assert assignments[0].metadata.get("depends_on") == []
 
 
 def test_build_outputs_rejects_unknown_depends_on_slug() -> None:
@@ -383,10 +389,11 @@ def test_build_outputs_supports_forward_reference() -> None:
         ],
     }
     outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
-    qa_meta = outputs[0].metadata
-    be_payload = outputs[1].payload
+    assignments = [o for o in outputs if o.message_type == MessageType.TASK_ASSIGNMENT]
+    qa_msg, be_msg = assignments
+    be_payload = be_msg.payload
     assert isinstance(be_payload, TaskAssignmentPayload)
-    assert qa_meta.get("depends_on") == [str(be_payload.task_id)]
+    assert qa_msg.metadata.get("depends_on") == [str(be_payload.task_id)]
 
 
 def test_build_outputs_returns_fail_report_when_no_subtasks() -> None:
@@ -414,3 +421,51 @@ def test_tl_prompt_includes_conservative_depends_on_rule() -> None:
         "TL prompt must teach conservative depends_on — see iter_4.md Phase 3"
     )
     assert "Before emitting, audit each `depends_on` entry" in text
+
+
+# === iter-4 Phase 4: DAG-preview broadcast ===
+
+
+def test_build_outputs_emits_dag_preview_broadcast() -> None:
+    """TL's outputs include exactly one BROADCAST message describing
+    the planned DAG, alongside the per-subtask assignments. Lets the
+    owner see the plan in `ai-team watch` seconds before agents start
+    — catches a wrong DAG before it commits resources. See
+    iter_4.md Phase 4."""
+    agent = TeamLeadAgent(llm=_StubLLM())
+    incoming = _incoming_task()
+    plan = {
+        "summary": "test plan",
+        "subtasks": [
+            {
+                "id": "arch",
+                "recipient": "architect",
+                "title": "T",
+                "description": "D",
+                "priority": "P2",
+                "depends_on": [],
+            },
+            {
+                "id": "be",
+                "recipient": "backend_developer",
+                "title": "T",
+                "description": "D",
+                "priority": "P2",
+                "depends_on": ["arch"],
+            },
+        ],
+    }
+    outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
+
+    broadcasts = [o for o in outputs if o.message_type == MessageType.BROADCAST]
+    assignments = [o for o in outputs if o.message_type == MessageType.TASK_ASSIGNMENT]
+    assert len(broadcasts) == 1
+    assert len(assignments) == 2
+
+    preview = broadcasts[0].payload
+    assert isinstance(preview, BroadcastPayload)
+    assert preview.topic == "tl.dag_preview"
+    # The body must mention both slugs and the dependency relationship.
+    assert "arch" in preview.body
+    assert "be" in preview.body
+    assert "depends_on" in preview.body or "→" in preview.body

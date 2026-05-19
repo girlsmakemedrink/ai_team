@@ -167,8 +167,9 @@ async def test_user_to_tl_to_pm_to_report(
         await audit.write_message(user_msg, iteration=1)
         await bus.publish(user_msg)
 
-        # Wait until 3 audit rows exist for this correlation:
-        # user→TL (we just wrote), TL→PM (dispatcher), PM→TL (dispatcher).
+        # Wait until 4 audit rows exist for this correlation:
+        # user→TL (we just wrote), TL→broadcast (iter-4 DAG preview),
+        # TL→PM (dispatcher), PM→TL (dispatcher).
         deadline = asyncio.get_event_loop().time() + 30
         rows: list[AuditLog] = []
         while asyncio.get_event_loop().time() < deadline:
@@ -184,14 +185,14 @@ async def test_user_to_tl_to_pm_to_report(
                     .scalars()
                     .all()
                 )
-            if len(rows) >= 3:
+            if len(rows) >= 4:
                 break
             await asyncio.sleep(0.2)
 
-        assert len(rows) >= 3, f"only {len(rows)} audit rows after 30s"
+        assert len(rows) >= 4, f"only {len(rows)} audit rows after 30s"
 
-        # Three distinct senders.
-        senders = [r.sender for r in rows[:3]]
+        senders = [r.sender for r in rows]
+        message_types = [r.message_type for r in rows]
         debug = [
             (
                 r.id,
@@ -202,8 +203,16 @@ async def test_user_to_tl_to_pm_to_report(
             )
             for r in rows
         ]
-        expected = ["user", "team_lead", "product_manager"]
-        assert senders == expected, f"senders={senders} debug={debug}"
+        # User submits, then TL emits two messages (DAG preview broadcast
+        # + PM task_assignment), then PM reports back.
+        assert senders[0] == "user", f"senders={senders} debug={debug}"
+        assert senders.count("team_lead") == 2, f"senders={senders} debug={debug}"
+        assert "product_manager" in senders, f"senders={senders} debug={debug}"
+        # iter-4: TL must emit exactly one DAG preview broadcast alongside
+        # the task assignment.
+        assert message_types.count("broadcast") == 1, (
+            f"message_types={message_types} debug={debug}"
+        )
 
         # Chain verification is covered by test_audit_writer (which
         # intentionally tampers with rows). Here we just check that the
