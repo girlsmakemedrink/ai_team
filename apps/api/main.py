@@ -32,6 +32,7 @@ from agents.architect import ArchitectAgent
 from agents.backend_developer import BackendDeveloperAgent
 from agents.designer import DesignerAgent
 from agents.devops import DevOpsAgent
+from agents.frontend_developer import FrontendDeveloperAgent
 from agents.market_researcher import MarketResearcherAgent
 from agents.product_manager import ProductManagerAgent
 from agents.qa_engineer import QAEngineerAgent
@@ -85,6 +86,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         AgentId.QA_ENGINEER: QAEngineerAgent(llm=llm),
         AgentId.DESIGNER: DesignerAgent(llm=llm),
         AgentId.DEVOPS: DevOpsAgent(llm=llm),
+        AgentId.FRONTEND_DEVELOPER: FrontendDeveloperAgent(llm=llm),
         AgentId.MARKET_RESEARCHER: MarketResearcherAgent(llm=llm),
     }
     dispatcher = AgentDispatcher(
