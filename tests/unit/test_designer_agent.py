@@ -158,3 +158,12 @@ async def test_handle_skips_non_task_assignment() -> None:
         payload={"kind": "question", "question_id": str(uuid4()), "text": "hi"},
     )
     assert await agent.handle(other) == []
+
+
+def test_llm_timeout_s_is_600_for_designer() -> None:
+    """Designer's per-call timeout must be 600 s (matches Architect /
+    Backend / Frontend / DevOps). iter-7 demo Designer timed out at
+    the 300 s BaseAgent default on the v2 UX brief + landing-page
+    wireframe task. See iter_7_demo_report.md Failure 1 and
+    iter_8.md decision #1."""
+    assert DesignerAgent.llm_timeout_s == 600
