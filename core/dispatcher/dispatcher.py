@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 import structlog
 
 from core.dispatcher.hold_queue import HoldQueue
-from core.llm.base import LLMBudgetExhaustedError
+from core.llm.base import LLMBudgetExhaustedError, MCPUnhealthyError
 from core.messaging.schemas import (
     AgentId,
     AgentMessage,
@@ -320,6 +320,14 @@ def _synthesise_failed_report(
         status = TaskStatus.BLOCKED
         blocked_on: str | None = "budget"
         priority = Priority.P2  # recoverable by owner; not a crash
+    elif isinstance(exc, MCPUnhealthyError):
+        # iter-9: MCP pre-flight failures are recoverable by owner
+        # (fix env var, restart container, etc.), not crashes. Same
+        # held-not-dropped posture as the budget branch. See
+        # iter_8_demo_report.md Failure 1 + iter_9.md decision #2.
+        status = TaskStatus.BLOCKED
+        blocked_on = "mcp_unhealthy"
+        priority = Priority.P2
     else:
         status = TaskStatus.FAILED
         blocked_on = None
