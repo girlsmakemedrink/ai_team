@@ -115,7 +115,7 @@ PRICE_TABLE_CENTS_PER_MTOK: dict[str, tuple[int, int]] = {
 # override per-call.
 DEFAULT_MAX_BUDGET_USD_PER_TIER: dict[ModelTier, float] = {
     "haiku": 0.30,
-    "sonnet": 1.50,
+    "sonnet": 2.50,
     "opus": 4.00,
 }
 
