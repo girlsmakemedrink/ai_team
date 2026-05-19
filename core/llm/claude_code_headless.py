@@ -46,23 +46,21 @@ def _resolve_model_id(tier: ModelTier) -> str:
 
 
 def _is_budget_exhausted_stdout(out: str) -> bool:
-    """Return True iff `out` is a JSON object with
-    `subtype == "error_max_budget_usd"`.
+    """Return True iff `out` contains the `error_max_budget_usd`
+    marker from `claude -p`.
 
     iter-5's stdout-tee surfaced the iter-3/4 mystery: `claude -p`
     reports budget exhaustion as `{"type":"result","subtype":
     "error_max_budget_usd",...}` on stdout (exit 1, empty stderr).
-    Detection has to be robust against truncation (we cap stdout at 2 KB
-    in the caller) and against substring false positives, so we attempt
-    a real JSON parse only when the marker substring appears.
+
+    iter-8: substring-only match. The adapter's stdout cap (8 KB as
+    of iter-8) can leave the response JSON incomplete; iter-6's
+    JSON-parse-required version returned False on truncation, which
+    defeated the BLOCKED branch in the iter-7 demo (Failure 2). The
+    marker is a structured response field — not natural-language
+    text — so false-positive risk is near-zero.
     """
-    if "error_max_budget_usd" not in out:
-        return False
-    try:
-        parsed = json.loads(out)
-    except (json.JSONDecodeError, TypeError):
-        return False
-    return isinstance(parsed, dict) and parsed.get("subtype") == "error_max_budget_usd"
+    return "error_max_budget_usd" in out
 
 
 class ClaudeCodeHeadlessClient:
@@ -226,7 +224,12 @@ class ClaudeCodeHeadlessClient:
             # iter-5: also capture stdout. iter-4 demo's Backend hit
             # `exited 1` with EMPTY stderr — the actual error was on
             # stdout. See iter_4_demo_report.md Failure 1.
-            out = stdout.decode(errors="replace")[:2000]
+            # iter-8: cap raised 2 KB → 8 KB so real-LLM error JSONs
+            # (up to ~3-4 KB in practice) fit without truncating the
+            # marker. iter-7 demo Failure 2 surfaced the truncation
+            # gap. Substring detector below is the load-bearing fix;
+            # the larger cap is defense-in-depth + richer diagnostics.
+            out = stdout.decode(errors="replace")[:8000]
             log.error(
                 "llm.invoke.failed",
                 returncode=proc.returncode,

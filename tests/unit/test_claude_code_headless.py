@@ -530,15 +530,58 @@ async def test_invoke_timeout_tolerates_drain_failure() -> None:
         )
 
 
-def test_is_budget_exhausted_stdout_robust_against_truncated_json() -> None:
-    """The 2-KB stdout cap can leave the JSON object incomplete; in that
-    case `_is_budget_exhausted_stdout` must return False (caller falls
-    back to LLMInvocationError) rather than raising on malformed JSON.
-    The marker substring is present but the JSON is unparseable."""
+def test_is_budget_exhausted_stdout_matches_truncated_marker() -> None:
+    """iter-8 flips the iter-6 contract: detect budget exhaustion by
+    substring match alone, so a truncated body still routes to
+    BLOCKED. The 2-KB stdout cap (or any future smaller cap) can
+    leave the response JSON incomplete; iter-6's JSON-parse-required
+    version returned False on truncation, which defeated the BLOCKED
+    branch in the iter-7 demo (Failure 2). The marker is a
+    structured response field — not natural-language text — so
+    false-positive risk is near-zero. See iter_8.md Phase 2."""
     from core.llm.claude_code_headless import _is_budget_exhausted_stdout
 
     truncated = '{"type":"result","subtype":"error_max_budget_usd","usage":{"input'
-    assert _is_budget_exhausted_stdout(truncated) is False
-    # And without the marker substring it short-circuits to False without
-    # attempting to parse.
-    assert _is_budget_exhausted_stdout("plain stdout, no marker here") is False
+    assert _is_budget_exhausted_stdout(truncated) is True
+
+    # Substring without surrounding JSON also matches — the marker is
+    # the load-bearing signal.
+    assert _is_budget_exhausted_stdout("garbled output: error_max_budget_usd") is True
+
+
+def test_is_budget_exhausted_stdout_returns_false_without_marker() -> None:
+    """No marker → never True. Guards against widening the detector
+    to false positives on unrelated subtypes."""
+    from core.llm.claude_code_headless import _is_budget_exhausted_stdout
+
+    assert _is_budget_exhausted_stdout("plain stdout, no marker") is False
+    assert _is_budget_exhausted_stdout('{"subtype":"rate_limited"}') is False
+    assert _is_budget_exhausted_stdout("") is False
+
+
+@pytest.mark.asyncio
+async def test_invoke_captures_marker_up_to_8kb_stdout() -> None:
+    """iter-8 bumps the adapter stdout cap from 2 KB → 8 KB so real-
+    LLM error JSONs (up to ~3-4 KB in practice) fit without
+    truncation. The marker substring at byte ~4096 must still be
+    visible to the detector. See iter_8.md Phase 2."""
+    client = ClaudeCodeHeadlessClient()
+    big_stdout = b"x" * 4096 + b"error_max_budget_usd in here at byte 4096"
+
+    class _FailingProc:
+        returncode = 1
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return big_stdout, b""
+
+    async def _fake_create(*_cmd: str, **_kwargs: Any) -> _FailingProc:
+        return _FailingProc()
+
+    with (
+        patch(
+            "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=_fake_create),
+        ),
+        pytest.raises(LLMBudgetExhaustedError),
+    ):
+        await client.invoke(system_prompt="sp", user_message="u", model="sonnet")

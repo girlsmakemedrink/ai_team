@@ -29,12 +29,14 @@ def test_tokens_total() -> None:
     assert t.total == 15
 
 
-def test_default_budget_per_tier_matches_iter6_values() -> None:
-    # Pin iter-6 budget caps so a future tightening surfaces in review with
-    # reasoning. See docs/iterations/iter_5_demo_report.md Failure 1 and
-    # iter_6.md decision #1.
+def test_default_budget_per_tier_matches_iter8_values() -> None:
+    # Pin iter-8 budget caps so a future tightening surfaces in review
+    # with reasoning. Sonnet raised $1.50 → $2.50 after iter-7 demo
+    # Backend hit $1.50 at 11 turns. See iter_7_demo_report.md
+    # Failure 3 + iter_8.md decision #4. Haiku + opus unchanged
+    # since iter-6.
     assert DEFAULT_MAX_BUDGET_USD_PER_TIER == {
         "haiku": 0.30,
-        "sonnet": 1.50,
+        "sonnet": 2.50,
         "opus": 4.00,
     }
