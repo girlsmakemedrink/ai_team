@@ -1321,6 +1321,203 @@ async def test_mcp_unhealthy_emits_blocked_does_not_cascade_drop(
         await feed.close()
 
 
+# === iter-10 Phase 2: LLM-emitted MCP-race summary → BLOCKED via substring router ===
+
+
+class _LLMReportsMCPRaceBackend(BaseAgent):
+    """Stub Backend that RETURNS (does not raise) a real
+    task_report(failed) whose summary substring-matches iter-10's
+    MCP-race pattern. The dispatcher's substring router (iter-10
+    Phase 2) must rewrite to BLOCKED before HMAC-sign so HoldQueue
+    holds dependents (mirrors iter-6 + iter-9 BLOCKED contracts)."""
+
+    role: ClassVar[AgentId] = AgentId.BACKEND_DEVELOPER
+    system_prompt_path: ClassVar[Path] = Path("/dev/null")
+
+    def __init__(self) -> None:
+        self._cached_prompt: str | None = None
+
+    def system_prompt(self) -> str:
+        return "# Role: Backend Developer\nStub agent for tests.\n"
+
+    async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
+        assert isinstance(msg.payload, TaskAssignmentPayload)
+        return [
+            AgentMessage(
+                correlation_id=msg.correlation_id,
+                sender=self.role,
+                recipient=AgentId.TEAM_LEAD,
+                message_type=MessageType.TASK_REPORT,
+                priority=Priority.P1,
+                payload=TaskReportPayload(
+                    task_id=msg.payload.task_id,
+                    status=TaskStatus.FAILED,
+                    progress_pct=0,
+                    summary=(
+                        "Backend Developer: tests failed. Implemented "
+                        "the full idea-validator pipeline. All source "
+                        "files written to the worktree filesystem but "
+                        "could not be committed or pushed: MCP server "
+                        "ai-team-repo never connected, and the Bash "
+                        "tool requires manual approval for all "
+                        "git/uv/make commands in this session."
+                    ),
+                ),
+            )
+        ]
+
+    def build_outputs(
+        self,
+        response: LLMResponse,
+        incoming: AgentMessage,
+    ) -> list[AgentMessage]:
+        del response, incoming
+        return []
+
+
+async def test_mcp_race_summary_rewrites_to_blocked_does_not_cascade(
+    redis_url: str,
+    session_factory: async_sessionmaker[AsyncSession],
+    db_session: AsyncSession,
+) -> None:
+    _ = db_session
+    """Real task_report(failed) from the LLM with an MCP-race
+    summary → iter-10 substring router rewrites to BLOCKED →
+    HoldQueue holds QA → root stays in_progress. Same outcome
+    as iter-9's MCPUnhealthyError → BLOCKED test, exercising
+    the substring-router code path instead of the exception
+    path. See iter_10.md success criterion #3 +
+    iter_9_demo_report.md Failure 1."""
+    bus = MessageBus.from_url(redis_url)
+    feed = FeedPublisher.from_url(redis_url, db_session_factory=session_factory)
+    signer = HMACSigner(_SECRET)
+    audit = AuditLogWriter(session_factory, _SECRET)
+
+    llm = _OnlyTLResponseLLM(_tl_be_then_qa_response())
+    qa_received: list[AgentMessage] = []
+
+    agents = {
+        AgentId.TEAM_LEAD: TeamLeadAgent(llm=llm),
+        AgentId.BACKEND_DEVELOPER: _LLMReportsMCPRaceBackend(),
+        AgentId.QA_ENGINEER: _StubQA(observer=qa_received),
+    }
+    task_state = TaskStateReducer(session_factory)
+    dispatcher = AgentDispatcher(
+        bus=bus,
+        feed=feed,
+        audit=audit,
+        signer=signer,
+        agents=agents,
+        iteration=10,
+        task_state=task_state,
+    )
+
+    task = asyncio.create_task(dispatcher.run())
+
+    correlation_id = uuid4()
+    root_task_id = uuid4()
+    user_msg = signer.with_signature(
+        AgentMessage(
+            correlation_id=correlation_id,
+            sender=AgentId.USER,
+            recipient=AgentId.TEAM_LEAD,
+            message_type=MessageType.TASK_ASSIGNMENT,
+            priority=Priority.P2,
+            payload=TaskAssignmentPayload(
+                task_id=root_task_id,
+                title="iter-10 mcp-race summary path",
+                description="Backend will return a failed report with MCP-race summary.",
+            ),
+        )
+    )
+
+    async with session_factory() as session:
+        session.add(
+            Task(
+                id=root_task_id,
+                correlation_id=correlation_id,
+                title="iter-10 mcp-race summary path",
+                description="Backend will return a failed report with MCP-race summary.",
+                status="in_progress",
+                assigned_agent=AgentId.TEAM_LEAD.value,
+                priority=Priority.P2.value,
+                iteration=10,
+            )
+        )
+        await session.commit()
+
+    try:
+        await audit.write_message(user_msg, iteration=10)
+        await bus.publish(user_msg)
+
+        deadline = asyncio.get_event_loop().time() + 15
+        be_report_rows: list[AuditLog] = []
+        while asyncio.get_event_loop().time() < deadline:
+            async with session_factory() as session:
+                be_report_rows = list(
+                    (
+                        await session.execute(
+                            select(AuditLog)
+                            .where(AuditLog.correlation_id == correlation_id)
+                            .where(AuditLog.sender == AgentId.BACKEND_DEVELOPER.value)
+                            .where(AuditLog.message_type == MessageType.TASK_REPORT.value)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            if be_report_rows:
+                break
+            await asyncio.sleep(0.2)
+        assert be_report_rows, "no task_report from Backend after 15s"
+
+        # Audit row reflects the REWRITTEN payload, not the
+        # LLM's original failed status. blocked_on='mcp_unhealthy'.
+        be_payload = be_report_rows[0].payload_json.get("payload", {})
+        assert be_payload.get("status") == TaskStatus.BLOCKED.value, (
+            f"expected blocked, got {be_payload.get('status')!r}"
+        )
+        assert be_payload.get("blocked_on") == "mcp_unhealthy", (
+            f"expected blocked_on='mcp_unhealthy', got {be_payload.get('blocked_on')!r}"
+        )
+        # Summary kept verbatim from the LLM's report.
+        assert "MCP server ai-team-repo never connected" in be_payload.get("summary", "")
+
+        # QA was NEVER delivered (held under BLOCKED).
+        await asyncio.sleep(1.0)
+        assert qa_received == [], (
+            f"QA should be held under BLOCKED, but received {len(qa_received)} messages"
+        )
+
+        # Root Task stays in_progress.
+        async with session_factory() as session:
+            root = (await session.execute(select(Task).where(Task.id == root_task_id))).scalar_one()
+        assert root.status == "in_progress", (
+            f"root must stay in_progress under BLOCKED, got {root.status!r}"
+        )
+
+        # QA's child Task row stays in_progress.
+        async with session_factory() as session:
+            children = (
+                (await session.execute(select(Task).where(Task.parent_task_id == root_task_id)))
+                .scalars()
+                .all()
+            )
+        qa_children = [c for c in children if c.assigned_agent == AgentId.QA_ENGINEER.value]
+        assert qa_children, "no QA child row inserted"
+        assert qa_children[0].status == "in_progress", (
+            f"QA child must stay in_progress under BLOCKED, got {qa_children[0].status!r}"
+        )
+    finally:
+        dispatcher.shutdown()
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except (TimeoutError, asyncio.CancelledError):
+            task.cancel()
+        await bus.close()
+        await feed.close()
+
+
 # === iter-7 Phase 3: cascade drops through HoldQueue (transitive) ===
 
 
