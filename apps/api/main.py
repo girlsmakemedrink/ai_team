@@ -36,6 +36,7 @@ from agents.frontend_developer import FrontendDeveloperAgent
 from agents.market_researcher import MarketResearcherAgent
 from agents.product_manager import ProductManagerAgent
 from agents.qa_engineer import QAEngineerAgent
+from agents.sre_support import SRESupportAgent
 from agents.team_lead import TeamLeadAgent
 from core.audit.writer import AuditLogWriter
 from core.config import Settings, get_settings
@@ -88,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         AgentId.DEVOPS: DevOpsAgent(llm=llm),
         AgentId.FRONTEND_DEVELOPER: FrontendDeveloperAgent(llm=llm),
         AgentId.MARKET_RESEARCHER: MarketResearcherAgent(llm=llm),
+        AgentId.SRE_SUPPORT: SRESupportAgent(llm=llm),
     }
     dispatcher = AgentDispatcher(
         bus=bus,
