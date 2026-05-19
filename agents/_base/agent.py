@@ -56,7 +56,13 @@ class BaseAgent(ABC):
     disallowed_tools: ClassVar[tuple[str, ...]] = ()
     system_prompt_path: ClassVar[Path]
     max_turns: ClassVar[int] = 8
-    llm_timeout_s: ClassVar[int] = 120
+    # 300 s default — the iter-3 demo run found PM Sonnet's user-story
+    # decomposition takes ~150 s of model output for a realistic spec,
+    # so the historical 120 s default cut PM off mid-turn. Agents that
+    # genuinely need longer (Backend, Frontend, DevOps at 600 s)
+    # override this; agents like TL whose calls finish quickly are
+    # unaffected — the timeout is a ceiling, not a floor.
+    llm_timeout_s: ClassVar[int] = 300
     max_concurrent: ClassVar[int] = 1  # serial per agent by default
     # Per-role env merged into claude -p's subprocess env (via LLMClient.invoke
     # env=...). Typically the role-specific AI_TEAM_PATH_PREFIXES / DENY /
@@ -83,11 +89,39 @@ class BaseAgent(ABC):
             user_message=user_msg,
             session_key=str(msg.correlation_id),
         )
-        return self.build_outputs(response, msg)
+        outputs = self.build_outputs(response, msg)
+        return self._stamp_metrics(outputs, response)
 
     @abstractmethod
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         """Translate the LLM response into outbound AgentMessages."""
+
+    @staticmethod
+    def _stamp_metrics(outputs: list[AgentMessage], response: LLMResponse) -> list[AgentMessage]:
+        """Attach per-turn LLM metrics to every output's metadata['llm'].
+
+        Same response object produces N outputs (TL emits 3 sub-task
+        assignments from one decomposition turn). Each output carries
+        the same metrics — they describe the LLM call that produced
+        them, not the message itself.
+
+        The metrics ride in AgentMessage.metadata (already on the
+        envelope) so they persist to audit_log.payload_json without
+        a schema bump. A single SQL query over the metadata path
+        reconstructs the demo report — see scripts/demo_iter_3.sh.
+        """
+        metrics = {
+            "tokens_in": response.tokens.input,
+            "tokens_out": response.tokens.output,
+            "cached_input": response.tokens.cached_input,
+            "cost_cents": response.cost_estimate_cents,
+            "duration_ms": response.duration_ms,
+            "model": response.tokens.model,
+            "validated_against_schema": response.validated_against_schema,
+        }
+        return [
+            out.model_copy(update={"metadata": {**out.metadata, "llm": metrics}}) for out in outputs
+        ]
 
     # ----- helpers subclasses may override -----
 

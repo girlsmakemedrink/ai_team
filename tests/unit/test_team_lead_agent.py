@@ -7,7 +7,7 @@ call needed)."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
@@ -25,6 +25,8 @@ from core.messaging.schemas import (
 )
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from core.llm.base import LLMResponse
 
 
@@ -176,3 +178,223 @@ async def test_skips_non_blocked_task_reports() -> None:
     outputs = await agent.handle(msg)
 
     assert outputs == []
+
+
+# === depends_on / metadata stamping (iter-3 Phase 2) ===
+
+
+def _stub_llm_response(structured: dict[str, Any]) -> LLMResponse:
+    """Build a minimal LLMResponse — only `structured` is exercised by build_outputs."""
+    from core.llm.base import LLMResponse, TokensUsage  # local import to keep file lean
+
+    return LLMResponse(
+        text="",
+        structured=structured,
+        session_id="test-session",
+        tokens=TokensUsage(input=10, output=20, cached_input=0, model="claude-opus-4-7"),
+        cost_estimate_cents=5,
+        duration_ms=123,
+        validated_against_schema=True,
+    )
+
+
+def _incoming_task(task_id: UUID | None = None) -> AgentMessage:
+    return AgentMessage(
+        correlation_id=uuid4(),
+        sender=AgentId.USER,
+        recipient=AgentId.TEAM_LEAD,
+        message_type=MessageType.TASK_ASSIGNMENT,
+        priority=Priority.P2,
+        payload=TaskAssignmentPayload(
+            task_id=task_id or uuid4(),
+            title="root",
+            description="root task",
+        ),
+    )
+
+
+def test_build_outputs_emits_one_message_per_subtask() -> None:
+    agent = TeamLeadAgent(llm=_StubLLM())
+    incoming = _incoming_task()
+    plan = {
+        "summary": "decomposed",
+        "subtasks": [
+            {
+                "id": "arch",
+                "recipient": "architect",
+                "title": "Design",
+                "description": "Write ADR",
+                "priority": "P2",
+                "depends_on": [],
+            },
+            {
+                "id": "be",
+                "recipient": "backend_developer",
+                "title": "Build",
+                "description": "Implement per ADR",
+                "priority": "P2",
+                "depends_on": ["arch"],
+            },
+        ],
+    }
+    outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
+
+    assert len(outputs) == 2
+    arch_out, be_out = outputs
+    assert arch_out.recipient == AgentId.ARCHITECT
+    assert be_out.recipient == AgentId.BACKEND_DEVELOPER
+
+
+def test_build_outputs_stamps_subtask_id_and_parent_task_id() -> None:
+    agent = TeamLeadAgent(llm=_StubLLM())
+    incoming = _incoming_task()
+    plan = {
+        "summary": "x",
+        "subtasks": [
+            {
+                "id": "arch",
+                "recipient": "architect",
+                "title": "T",
+                "description": "D",
+                "priority": "P2",
+                "depends_on": [],
+            }
+        ],
+    }
+    outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
+    assert isinstance(incoming.payload, TaskAssignmentPayload)
+
+    arch = outputs[0]
+    assert arch.metadata.get("subtask_id") == "arch"
+    assert arch.metadata.get("parent_task_id") == str(incoming.payload.task_id)
+
+
+def test_build_outputs_resolves_depends_on_to_predecessor_uuids() -> None:
+    agent = TeamLeadAgent(llm=_StubLLM())
+    incoming = _incoming_task()
+    plan = {
+        "summary": "x",
+        "subtasks": [
+            {
+                "id": "arch",
+                "recipient": "architect",
+                "title": "T",
+                "description": "D",
+                "priority": "P2",
+                "depends_on": [],
+            },
+            {
+                "id": "be",
+                "recipient": "backend_developer",
+                "title": "T",
+                "description": "D",
+                "priority": "P2",
+                "depends_on": ["arch"],
+            },
+        ],
+    }
+    outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
+    arch_payload = outputs[0].payload
+    be_payload = outputs[1].payload
+    assert isinstance(arch_payload, TaskAssignmentPayload)
+    assert isinstance(be_payload, TaskAssignmentPayload)
+
+    # be.metadata["depends_on"] is a list of UUID strings matching arch's
+    # payload.task_id (not arch's message_id and not arch's slug).
+    assert outputs[1].metadata.get("depends_on") == [str(arch_payload.task_id)]
+    # arch has no predecessors → empty list (NOT missing key).
+    assert outputs[0].metadata.get("depends_on") == []
+
+
+def test_build_outputs_handles_subtasks_missing_depends_on_key() -> None:
+    """Backwards compatible: a subtask with no `depends_on` key is treated as []."""
+    agent = TeamLeadAgent(llm=_StubLLM())
+    incoming = _incoming_task()
+    plan = {
+        "summary": "x",
+        "subtasks": [
+            {
+                "id": "arch",
+                "recipient": "architect",
+                "title": "T",
+                "description": "D",
+                "priority": "P2",
+            }
+        ],
+    }
+    outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
+    assert outputs[0].metadata.get("depends_on") == []
+
+
+def test_build_outputs_rejects_unknown_depends_on_slug() -> None:
+    """Forward-ref / unknown slug → loud failure (TASK_REPORT to USER)."""
+    agent = TeamLeadAgent(llm=_StubLLM())
+    incoming = _incoming_task()
+    plan = {
+        "summary": "x",
+        "subtasks": [
+            {
+                "id": "be",
+                "recipient": "backend_developer",
+                "title": "T",
+                "description": "D",
+                "priority": "P2",
+                "depends_on": ["arch"],  # slug that doesn't exist in this decomposition
+            }
+        ],
+    }
+    outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
+    assert len(outputs) == 1
+    fail = outputs[0]
+    assert fail.recipient == AgentId.USER
+    assert fail.message_type == MessageType.TASK_REPORT
+    fail_payload = fail.payload
+    assert isinstance(fail_payload, TaskReportPayload)
+    assert fail_payload.status == TaskStatus.FAILED
+    assert "depends_on" in fail_payload.summary.lower() or "arch" in fail_payload.summary
+
+
+def test_build_outputs_supports_forward_reference() -> None:
+    """A subtask listed earlier can depend_on one listed later — both
+    slugs are in the same decomposition. Order at runtime is enforced
+    by HoldQueue, not by list order."""
+    agent = TeamLeadAgent(llm=_StubLLM())
+    incoming = _incoming_task()
+    plan = {
+        "summary": "x",
+        "subtasks": [
+            # 'qa' listed first, depends on 'be' listed later
+            {
+                "id": "qa",
+                "recipient": "qa_engineer",
+                "title": "T",
+                "description": "D",
+                "priority": "P3",
+                "depends_on": ["be"],
+            },
+            {
+                "id": "be",
+                "recipient": "backend_developer",
+                "title": "T",
+                "description": "D",
+                "priority": "P2",
+                "depends_on": [],
+            },
+        ],
+    }
+    outputs = agent.build_outputs(_stub_llm_response(plan), incoming)
+    qa_meta = outputs[0].metadata
+    be_payload = outputs[1].payload
+    assert isinstance(be_payload, TaskAssignmentPayload)
+    assert qa_meta.get("depends_on") == [str(be_payload.task_id)]
+
+
+def test_build_outputs_returns_fail_report_when_no_subtasks() -> None:
+    agent = TeamLeadAgent(llm=_StubLLM())
+    incoming = _incoming_task()
+    outputs = agent.build_outputs(_stub_llm_response(None), incoming)  # type: ignore[arg-type]
+    assert len(outputs) == 1
+    assert outputs[0].recipient == AgentId.USER
+    payload = outputs[0].payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status == TaskStatus.FAILED

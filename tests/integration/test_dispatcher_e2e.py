@@ -7,12 +7,14 @@ agent's system prompt is invoking it. No real `claude -p` calls.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
+from agents._base import BaseAgent
 from agents.product_manager import ProductManagerAgent
 from agents.team_lead import TeamLeadAgent
 from core.audit.writer import AuditLogWriter
@@ -26,8 +28,11 @@ from core.messaging.schemas import (
     MessageType,
     Priority,
     TaskAssignmentPayload,
+    TaskReportPayload,
+    TaskStatus,
 )
-from core.persistence.models import AuditLog, FeedEvent
+from core.persistence.models import AuditLog, FeedEvent, Task
+from core.persistence.task_state import TaskStateReducer
 from core.security.hmac_signer import HMACSigner
 
 if TYPE_CHECKING:
@@ -68,10 +73,12 @@ def _tl_response() -> LLMResponse:
             "summary": "Route to PM for user stories.",
             "subtasks": [
                 {
+                    "id": "pm_stories",
                     "recipient": "product_manager",
                     "title": "Generate user stories",
                     "description": "Produce 3-5 stories for the test task.",
                     "priority": "P2",
+                    "depends_on": [],
                 }
             ],
         },
@@ -224,6 +231,305 @@ async def test_user_to_tl_to_pm_to_report(
             await asyncio.sleep(0.2)
         assert "team_lead" in feed_senders, f"feed_senders={feed_senders}"
         assert "product_manager" in feed_senders, f"feed_senders={feed_senders}"
+    finally:
+        dispatcher.shutdown()
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except (TimeoutError, asyncio.CancelledError):
+            task.cancel()
+        await bus.close()
+        await feed.close()
+
+
+# === iter-3 Phase 2D: three-stage dependency-ordered chain ===
+
+
+class _StaticDoneAgentBase(BaseAgent):
+    """Stub base: returns one TASK_REPORT(DONE) per incoming TASK_ASSIGNMENT.
+
+    Subclasses fix `role` as a ClassVar (mypy-friendly) and pass an
+    observer list to capture every message the dispatcher delivered.
+    """
+
+    system_prompt_path: ClassVar[Path] = Path("/dev/null")
+
+    def __init__(self, *, observer: list[AgentMessage]) -> None:
+        # Intentionally skip BaseAgent.__init__ — the stub never calls
+        # the LLM and doesn't need a system prompt loader.
+        self._observer = observer
+        self._cached_prompt: str | None = None
+
+    def system_prompt(self) -> str:
+        return f"# Role: {self.role.value}\nStub agent for tests.\n"
+
+    async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
+        if msg.message_type != MessageType.TASK_ASSIGNMENT:
+            return []
+        if not isinstance(msg.payload, TaskAssignmentPayload):
+            return []
+        self._observer.append(msg)
+        return [
+            AgentMessage(
+                correlation_id=msg.correlation_id,
+                sender=self.role,
+                recipient=AgentId.TEAM_LEAD,
+                message_type=MessageType.TASK_REPORT,
+                priority=Priority.P3,
+                payload=TaskReportPayload(
+                    task_id=msg.payload.task_id,
+                    status=TaskStatus.DONE,
+                    progress_pct=100,
+                    summary=f"{self.role.value} done",
+                ),
+            )
+        ]
+
+    def build_outputs(
+        self,
+        response: LLMResponse,
+        incoming: AgentMessage,
+    ) -> list[AgentMessage]:
+        del response, incoming  # stub's handle() builds outputs directly
+        return []
+
+
+class _StubArchitect(_StaticDoneAgentBase):
+    role: ClassVar[AgentId] = AgentId.ARCHITECT
+
+
+class _StubBackend(_StaticDoneAgentBase):
+    role: ClassVar[AgentId] = AgentId.BACKEND_DEVELOPER
+
+
+class _StubQA(_StaticDoneAgentBase):
+    role: ClassVar[AgentId] = AgentId.QA_ENGINEER
+
+
+def _tl_three_stage_response() -> LLMResponse:
+    """TL emits a 3-stage DAG: arch → be → qa."""
+    return LLMResponse(
+        text="",
+        structured={
+            "summary": "Three-stage chain test.",
+            "subtasks": [
+                {
+                    "id": "arch",
+                    "recipient": "architect",
+                    "title": "Design",
+                    "description": "Write a tiny ADR.",
+                    "priority": "P2",
+                    "depends_on": [],
+                },
+                {
+                    "id": "be",
+                    "recipient": "backend_developer",
+                    "title": "Build",
+                    "description": "Implement per ADR.",
+                    "priority": "P2",
+                    "depends_on": ["arch"],
+                },
+                {
+                    "id": "qa",
+                    "recipient": "qa_engineer",
+                    "title": "Verify",
+                    "description": "Run tests.",
+                    "priority": "P3",
+                    "depends_on": ["be"],
+                },
+            ],
+        },
+        tools_used=[],
+        session_id="tl-3stage",
+        tokens=TokensUsage(input=10, output=20, model="claude-opus-4-7"),
+        cost_estimate_cents=0,
+        duration_ms=100,
+        raw={},
+    )
+
+
+class _OnlyTLResponseLLM:
+    """Used by TL only — stub agents in this test don't invoke the LLM."""
+
+    def __init__(self, tl_response: LLMResponse) -> None:
+        self._tl_response = tl_response
+        self.calls: list[str] = []
+
+    async def invoke(self, *, system_prompt: str, **kwargs: Any) -> LLMResponse:
+        head = system_prompt.lstrip()
+        if head.startswith("# Role: Team Lead"):
+            self.calls.append("team_lead")
+            return self._tl_response
+        raise RuntimeError(f"no scripted response for prompt: {system_prompt[:80]}")
+
+    async def reset_session(self, session_id: str) -> None:
+        return None
+
+
+async def test_dependency_ordered_three_stage_chain(
+    redis_url: str,
+    session_factory: async_sessionmaker[AsyncSession],
+    db_session: AsyncSession,
+) -> None:
+    _ = db_session  # ensures schema-setup fixture ran before this test
+    """TL emits arch → be → qa with depends_on; HoldQueue gates ordering.
+
+    Asserts:
+      - arch's TASK_ASSIGNMENT lands on the bus BEFORE be's
+      - be's TASK_ASSIGNMENT lands BEFORE qa's
+      - all three terminal TASK_REPORTs eventually arrive
+      - HoldQueue ends empty (no held messages leak)
+    """
+    bus = MessageBus.from_url(redis_url)
+    feed = FeedPublisher.from_url(redis_url, db_session_factory=session_factory)
+    signer = HMACSigner(_SECRET)
+    audit = AuditLogWriter(session_factory, _SECRET)
+
+    llm = _OnlyTLResponseLLM(_tl_three_stage_response())
+    arch_received: list[AgentMessage] = []
+    be_received: list[AgentMessage] = []
+    qa_received: list[AgentMessage] = []
+
+    agents = {
+        AgentId.TEAM_LEAD: TeamLeadAgent(llm=llm),
+        AgentId.ARCHITECT: _StubArchitect(observer=arch_received),
+        AgentId.BACKEND_DEVELOPER: _StubBackend(observer=be_received),
+        AgentId.QA_ENGINEER: _StubQA(observer=qa_received),
+    }
+    task_state = TaskStateReducer(session_factory)
+    dispatcher = AgentDispatcher(
+        bus=bus,
+        feed=feed,
+        audit=audit,
+        signer=signer,
+        agents=agents,
+        iteration=3,
+        task_state=task_state,
+    )
+
+    task = asyncio.create_task(dispatcher.run())
+
+    correlation_id = uuid4()
+    root_task_id = uuid4()
+    user_msg = signer.with_signature(
+        AgentMessage(
+            correlation_id=correlation_id,
+            sender=AgentId.USER,
+            recipient=AgentId.TEAM_LEAD,
+            message_type=MessageType.TASK_ASSIGNMENT,
+            priority=Priority.P2,
+            payload=TaskAssignmentPayload(
+                task_id=root_task_id,
+                title="3-stage e2e",
+                description="Validate dependency ordering.",
+            ),
+        )
+    )
+
+    # Emulate the API: insert the root Task row when the user submits.
+    async with session_factory() as session:
+        session.add(
+            Task(
+                id=root_task_id,
+                correlation_id=correlation_id,
+                title="3-stage e2e",
+                description="Validate dependency ordering.",
+                status="in_progress",
+                assigned_agent=AgentId.TEAM_LEAD.value,
+                priority=Priority.P2.value,
+                iteration=3,
+            )
+        )
+        await session.commit()
+
+    try:
+        await audit.write_message(user_msg, iteration=3)
+        await bus.publish(user_msg)
+
+        # Wait for all 7 audit rows (user→TL, TL→arch/be/qa,
+        # arch→TL, be→TL, qa→TL).
+        deadline = asyncio.get_event_loop().time() + 30
+        rows: list[AuditLog] = []
+        while asyncio.get_event_loop().time() < deadline:
+            async with session_factory() as session:
+                rows = list(
+                    (
+                        await session.execute(
+                            select(AuditLog)
+                            .where(AuditLog.correlation_id == correlation_id)
+                            .order_by(AuditLog.id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            if len(rows) >= 7:
+                break
+            await asyncio.sleep(0.2)
+
+        assert len(rows) >= 7, (
+            f"only {len(rows)} audit rows after 30s; senders={[r.sender for r in rows]}"
+        )
+
+        # All three stub agents received exactly one assignment.
+        assert len(arch_received) == 1
+        assert len(be_received) == 1
+        assert len(qa_received) == 1
+
+        # Ground truth for ordering is the stubs' observer lists —
+        # _StaticDoneAgent appends only when the dispatcher actually
+        # delivers via the bus. HoldQueue gates that delivery, so
+        # receipt order is the chain order regardless of when the
+        # intent (audit row) was written.
+        arch_payload = arch_received[0].payload
+        be_payload = be_received[0].payload
+        assert isinstance(arch_payload, TaskAssignmentPayload)
+        assert isinstance(be_payload, TaskAssignmentPayload)
+
+        # Cross-check the depends_on metadata reflects the chain.
+        assert be_received[0].metadata.get("depends_on") == [str(arch_payload.task_id)]
+        assert qa_received[0].metadata.get("depends_on") == [str(be_payload.task_id)]
+
+        # Audit-row id ordering: the architect's TASK_REPORT(done) must
+        # appear strictly before the backend_developer's TASK_REPORT(done).
+        # If be ran in parallel with arch (no hold), be's report would
+        # likely land first because the stub agents are trivially fast
+        # and the TL emits all three assignments in one batch.
+        def _row_id(sender: str, message_type: str) -> int:
+            for r in rows:
+                if r.sender == sender and r.message_type == message_type:
+                    return r.id
+            raise AssertionError(f"no row sender={sender} type={message_type}")
+
+        arch_done_id = _row_id("architect", "task_report")
+        be_done_id = _row_id("backend_developer", "task_report")
+        qa_done_id = _row_id("qa_engineer", "task_report")
+        assert arch_done_id < be_done_id < qa_done_id, (
+            f"chain order broken: arch_done={arch_done_id} "
+            f"be_done={be_done_id} qa_done={qa_done_id}"
+        )
+
+        # HoldQueue is empty at end (no leaks).
+        held = dispatcher._hold_queue._held
+        for cid, items in held.items():
+            assert items == [], f"held messages remain at end of test: cid={cid} items={items}"
+
+        assert llm.calls == ["team_lead"]
+
+        # Root-task rollup: three children inserted, each marked `done`,
+        # parent flipped to `done`.
+        async with session_factory() as session:
+            children = (
+                (await session.execute(select(Task).where(Task.parent_task_id == root_task_id)))
+                .scalars()
+                .all()
+            )
+            root = (await session.execute(select(Task).where(Task.id == root_task_id))).scalar_one()
+        assert len(children) == 3, f"expected 3 child rows, got {len(children)}"
+        child_statuses = sorted(c.status for c in children)
+        assert child_statuses == ["done", "done", "done"], (
+            f"unexpected child statuses: {child_statuses}"
+        )
+        assert root.status == "done", f"root.status={root.status!r}; expected 'done'"
     finally:
         dispatcher.shutdown()
         try:

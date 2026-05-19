@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
+
 from click.testing import CliRunner
 
 from apps.cli.main import _api_base, _color_for, _render_event, _token_header, cli
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 def test_top_level_help_lists_commands() -> None:
@@ -78,3 +86,60 @@ def test_token_header_without_token() -> None:
     ctx.ensure_object(dict)
     h = _token_header(ctx)
     assert h == {}
+
+
+def test_cli_loads_owner_token_from_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """OWNER_TOKEN in .env (not shell env) must reach authed endpoints.
+
+    Regression pin for the iter-2 demo's `ai-team digest` 401: Click's
+    `envvar="OWNER_TOKEN"` only reads os.environ, so a token that lives
+    only in `.env` resolves to None and the CLI sends no Authorization
+    header. Fix: CLI loads .env from cwd before resolving the option.
+    """
+    monkeypatch.delenv("OWNER_TOKEN", raising=False)
+    (tmp_path / ".env").write_text("OWNER_TOKEN=from-dotenv-secret\n")
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    def fake_get(url: str, **kwargs: object) -> MagicMock:
+        captured["url"] = url
+        captured["headers"] = kwargs.get("headers", {})
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json = MagicMock(return_value=[])
+        resp.text = ""
+        return resp
+
+    with patch("apps.cli.main.httpx.get", side_effect=fake_get):
+        result = CliRunner().invoke(cli, ["list-pending"])
+
+    assert result.exit_code == 0, result.output
+    headers = captured.get("headers") or {}
+    assert isinstance(headers, dict)
+    assert headers.get("Authorization") == "Bearer from-dotenv-secret"
+
+
+def test_cli_shell_env_overrides_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real shell OWNER_TOKEN must win over .env (override=False semantics)."""
+    (tmp_path / ".env").write_text("OWNER_TOKEN=from-dotenv\n")
+    monkeypatch.setenv("OWNER_TOKEN", "from-shell")
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    def fake_get(url: str, **kwargs: object) -> MagicMock:
+        captured["headers"] = kwargs.get("headers", {})
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json = MagicMock(return_value=[])
+        resp.text = ""
+        return resp
+
+    with patch("apps.cli.main.httpx.get", side_effect=fake_get):
+        result = CliRunner().invoke(cli, ["list-pending"])
+
+    assert result.exit_code == 0, result.output
+    headers = captured.get("headers") or {}
+    assert isinstance(headers, dict)
+    assert headers.get("Authorization") == "Bearer from-shell"

@@ -80,7 +80,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*" = ["S", "PLR2004", "PLC0415"]
+"tests/**/*" = ["S", "PLR2004", "PLC0415", "PLR0915", "SLF001"]
 "scripts/**/*" = ["T201", "PLR2004", "PLC0415"]
 "apps/api/main.py" = ["B008"]                  # standard FastAPI Depends() idiom
 "apps/cli/main.py" = ["PLR2004", "PLC0415"]    # HTTP status codes + lazy subprocess import

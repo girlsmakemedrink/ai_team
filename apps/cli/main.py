@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
 import httpx
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -91,14 +94,26 @@ def _render_event(event: dict[str, Any]) -> Text:
     help="Base URL of the ai_team API.",
 )
 @click.option(
-    "--owner-token", envvar="OWNER_TOKEN", help="Owner token (or set OWNER_TOKEN in env / .env)."
+    "--owner-token",
+    default=None,
+    help="Owner token. Falls back to OWNER_TOKEN in shell env or .env.",
 )
 @click.pass_context
 def cli(ctx: click.Context, api_base: str, owner_token: str | None) -> None:
     """ai-team — multi-agent dev team CLI."""
+    # The API server reads .env via pydantic-settings; the CLI is a plain
+    # Click app, so without this OWNER_TOKEN that lives only in .env
+    # would never reach Authorization headers and authed endpoints return
+    # 401 (regression from the iter-2 demo). `override=False` matches
+    # pydantic-settings precedence: real shell env wins over .env.
+    # Anchor to cwd explicitly — load_dotenv's default search walks up
+    # from the caller's __file__, which would find the repo's own .env
+    # even when the user is running the CLI from a different directory
+    # (and would also confuse the unit tests for this fix).
+    load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
     ctx.ensure_object(dict)
     ctx.obj["api_base"] = api_base.rstrip("/")
-    ctx.obj["owner_token"] = owner_token
+    ctx.obj["owner_token"] = owner_token or os.environ.get("OWNER_TOKEN")
 
 
 # --- commands ---

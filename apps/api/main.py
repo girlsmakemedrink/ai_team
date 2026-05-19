@@ -53,6 +53,7 @@ from core.messaging.schemas import (
 )
 from core.observability import configure_logging, render_metrics
 from core.persistence.models import Checkpoint, PendingReview, Task
+from core.persistence.task_state import TaskStateReducer
 from core.security.hmac_signer import HMACSigner
 
 _log = structlog.get_logger(__name__)
@@ -91,13 +92,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         AgentId.MARKET_RESEARCHER: MarketResearcherAgent(llm=llm),
         AgentId.SRE_SUPPORT: SRESupportAgent(llm=llm),
     }
+    task_state = TaskStateReducer(session_factory)
     dispatcher = AgentDispatcher(
         bus=bus,
         feed=feed,
         audit=audit,
         signer=signer,
         agents=agents,
-        iteration=2,
+        iteration=3,
+        task_state=task_state,
     )
 
     # Disable in unit tests where no Redis is available. The integration
