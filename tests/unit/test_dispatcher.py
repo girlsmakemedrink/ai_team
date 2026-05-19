@@ -119,3 +119,38 @@ def test_synthesise_failed_report_priority_is_p1() -> None:
         exc=RuntimeError("x"),
     )
     assert out.priority == Priority.P1
+
+
+# === iter-6 Phase 2: budget-exhausted → BLOCKED synthesis ===
+
+
+def test_synthesise_blocked_report_for_budget_exhausted() -> None:
+    """When the dispatcher catches LLMBudgetExhaustedError, it should
+    synthesise TASK_REPORT(status=BLOCKED, blocked_on='budget') instead
+    of the default FAILED. BLOCKED does NOT cascade-drop dependents.
+    See iter_6.md Phase 2."""
+    from core.llm.base import LLMBudgetExhaustedError
+
+    incoming = _incoming_assignment(task_id=uuid4())
+    exc = LLMBudgetExhaustedError("budget exhausted: $0.50 over cap")
+    out = _synthesise_failed_report(role=AgentId.BACKEND_DEVELOPER, incoming=incoming, exc=exc)
+    payload = out.payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status == TaskStatus.BLOCKED
+    assert payload.blocked_on == "budget"
+    assert "LLMBudgetExhaustedError" in payload.summary
+    # Routes to TL like a normal blocked report.
+    assert out.recipient == AgentId.TEAM_LEAD
+
+
+def test_synthesise_blocked_priority_is_p2_not_p1() -> None:
+    """BLOCKED(budget) is recoverable by the owner; not as urgent as a
+    crash. P2 keeps it visible without paging."""
+    from core.llm.base import LLMBudgetExhaustedError
+
+    out = _synthesise_failed_report(
+        role=AgentId.BACKEND_DEVELOPER,
+        incoming=_incoming_assignment(),
+        exc=LLMBudgetExhaustedError("x"),
+    )
+    assert out.priority == Priority.P2

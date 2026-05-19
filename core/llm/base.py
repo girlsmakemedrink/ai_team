@@ -23,6 +23,14 @@ class LLMInvocationError(LLMError):
     malformed output."""
 
 
+class LLMBudgetExhaustedError(LLMError):
+    """Raised when `claude -p` returns subtype=error_max_budget_usd on
+    its stdout response JSON. The dispatcher catches this distinctly
+    and synthesises TASK_REPORT(status=BLOCKED, blocked_on='budget') so
+    dependents aren't cascade-dropped — owner can manually retry with
+    elevated budget. See iter_6.md Phase 2."""
+
+
 class TokensUsage(BaseModel):
     input: int = 0
     output: int = 0

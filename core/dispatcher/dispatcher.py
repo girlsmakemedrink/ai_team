@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import structlog
 
 from core.dispatcher.hold_queue import HoldQueue
+from core.llm.base import LLMBudgetExhaustedError
 from core.messaging.schemas import (
     AgentId,
     AgentMessage,
@@ -250,7 +251,7 @@ def _parse_depends_on(msg: AgentMessage) -> set[UUID]:
 def _synthesise_failed_report(
     *, role: AgentId, incoming: AgentMessage, exc: BaseException
 ) -> AgentMessage:
-    """Build a terminal TASK_REPORT(failed) for an agent that crashed.
+    """Build a terminal TASK_REPORT for an agent that crashed.
 
     Iter-4 demo's Backend hit `claude -p exited 1` with empty stderr;
     the dispatcher's except block logged the traceback but emitted
@@ -260,6 +261,11 @@ def _synthesise_failed_report(
     the same outbound pipeline as a real one (audit + feed +
     task-state + HoldQueue.mark_failed + bus), so the chain rolls
     up correctly on crash.
+
+    iter-6: `LLMBudgetExhaustedError` is special-cased to BLOCKED (not
+    FAILED). BLOCKED leaves dependents held in the HoldQueue rather
+    than cascade-dropping them — the owner can manually retry with
+    elevated budget. See iter_6.md Phase 2.
 
     `recipient` is USER when the incoming was a root-task user → TL
     assignment (so the rollup still surfaces to the owner); otherwise
@@ -276,17 +282,28 @@ def _synthesise_failed_report(
     metadata: dict[str, object] = {}
     if isinstance(parent_raw, str):
         metadata["parent_task_id"] = parent_raw
+
+    if isinstance(exc, LLMBudgetExhaustedError):
+        status = TaskStatus.BLOCKED
+        blocked_on: str | None = "budget"
+        priority = Priority.P2  # recoverable by owner; not a crash
+    else:
+        status = TaskStatus.FAILED
+        blocked_on = None
+        priority = Priority.P1  # crashes are high-priority for owner visibility
+
     return AgentMessage(
         correlation_id=incoming.correlation_id,
         sender=role,
         recipient=recipient,
         message_type=MessageType.TASK_REPORT,
-        priority=Priority.P1,  # failures are high-priority for owner visibility
+        priority=priority,
         payload=TaskReportPayload(
             task_id=task_id,
-            status=TaskStatus.FAILED,
+            status=status,
             progress_pct=0,
             summary=summary,
+            blocked_on=blocked_on,
         ),
         metadata=metadata,
     )

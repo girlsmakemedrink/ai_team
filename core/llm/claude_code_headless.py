@@ -17,6 +17,7 @@ import structlog
 
 from core.llm.base import (
     DEFAULT_MAX_BUDGET_USD_PER_TIER,
+    LLMBudgetExhaustedError,
     LLMInvocationError,
     LLMResponse,
     LLMTimeoutError,
@@ -42,6 +43,26 @@ _DEFAULT_MODEL_IDS: dict[ModelTier, str] = {
 def _resolve_model_id(tier: ModelTier) -> str:
     env_key = f"LLM_MODEL_{tier.upper()}"
     return os.environ.get(env_key, _DEFAULT_MODEL_IDS[tier])
+
+
+def _is_budget_exhausted_stdout(out: str) -> bool:
+    """Return True iff `out` is a JSON object with
+    `subtype == "error_max_budget_usd"`.
+
+    iter-5's stdout-tee surfaced the iter-3/4 mystery: `claude -p`
+    reports budget exhaustion as `{"type":"result","subtype":
+    "error_max_budget_usd",...}` on stdout (exit 1, empty stderr).
+    Detection has to be robust against truncation (we cap stdout at 2 KB
+    in the caller) and against substring false positives, so we attempt
+    a real JSON parse only when the marker substring appears.
+    """
+    if "error_max_budget_usd" not in out:
+        return False
+    try:
+        parsed = json.loads(out)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(parsed, dict) and parsed.get("subtype") == "error_max_budget_usd"
 
 
 class ClaudeCodeHeadlessClient:
@@ -191,6 +212,11 @@ class ClaudeCodeHeadlessClient:
                 stderr=err,
                 stdout=out,
             )
+            # iter-6: detect budget exhaustion specifically so the
+            # dispatcher can route it to BLOCKED instead of FAILED
+            # (no cascade-drop of dependents). See iter_6.md Phase 2.
+            if _is_budget_exhausted_stdout(out):
+                raise LLMBudgetExhaustedError(f"claude -p budget exhausted: stdout={out!r}")
             raise LLMInvocationError(
                 f"claude -p exited {proc.returncode}: stderr={err!r} stdout={out!r}"
             )
