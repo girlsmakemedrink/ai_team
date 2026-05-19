@@ -545,3 +545,182 @@ async def test_dependency_ordered_three_stage_chain(
             task.cancel()
         await bus.close()
         await feed.close()
+
+
+# === iter-5 Phase 1: agent handle() exception → synthesised TASK_REPORT(failed) ===
+
+
+class _RaisingBackend(BaseAgent):
+    """Stub Backend whose handle() always raises. Iter-5 dispatcher
+    must catch the exception and emit a synthetic TASK_REPORT(failed)
+    on the agent's behalf so HoldQueue / rollup see a terminal status."""
+
+    role: ClassVar[AgentId] = AgentId.BACKEND_DEVELOPER
+    system_prompt_path: ClassVar[Path] = Path("/dev/null")
+
+    def __init__(self) -> None:
+        # Intentionally skip BaseAgent.__init__ — stub never invokes the LLM.
+        self._cached_prompt: str | None = None
+
+    def system_prompt(self) -> str:
+        return "# Role: Backend Developer\nStub agent for tests.\n"
+
+    async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
+        del msg
+        raise RuntimeError("simulated backend crash for iter-5 dispatcher test")
+
+    def build_outputs(
+        self,
+        response: LLMResponse,
+        incoming: AgentMessage,
+    ) -> list[AgentMessage]:
+        del response, incoming  # stub never reaches build_outputs
+        return []
+
+
+def _tl_single_be_response() -> LLMResponse:
+    """TL emits a 1-subtask DAG: just be (no deps)."""
+    return LLMResponse(
+        text="",
+        structured={
+            "summary": "Single backend subtask.",
+            "subtasks": [
+                {
+                    "id": "be",
+                    "recipient": "backend_developer",
+                    "title": "Build",
+                    "description": "Implement something.",
+                    "priority": "P2",
+                    "depends_on": [],
+                }
+            ],
+        },
+        tools_used=[],
+        session_id="tl-iter5",
+        tokens=TokensUsage(input=10, output=20, model="claude-opus-4-7"),
+        cost_estimate_cents=0,
+        duration_ms=100,
+        raw={},
+    )
+
+
+async def test_agent_handle_exception_synthesises_failed_report(
+    redis_url: str,
+    session_factory: async_sessionmaker[AsyncSession],
+    db_session: AsyncSession,
+) -> None:
+    _ = db_session
+    """When Backend's handle() raises, the dispatcher must synthesise a
+    TASK_REPORT(failed) so the rollup + HoldQueue see a terminal status
+    instead of leaving the chain hung (iter-4 demo Backend exit-1)."""
+    bus = MessageBus.from_url(redis_url)
+    feed = FeedPublisher.from_url(redis_url, db_session_factory=session_factory)
+    signer = HMACSigner(_SECRET)
+    audit = AuditLogWriter(session_factory, _SECRET)
+
+    llm = _OnlyTLResponseLLM(_tl_single_be_response())
+
+    agents = {
+        AgentId.TEAM_LEAD: TeamLeadAgent(llm=llm),
+        AgentId.BACKEND_DEVELOPER: _RaisingBackend(),
+    }
+    task_state = TaskStateReducer(session_factory)
+    dispatcher = AgentDispatcher(
+        bus=bus,
+        feed=feed,
+        audit=audit,
+        signer=signer,
+        agents=agents,
+        iteration=5,
+        task_state=task_state,
+    )
+
+    task = asyncio.create_task(dispatcher.run())
+
+    correlation_id = uuid4()
+    root_task_id = uuid4()
+    user_msg = signer.with_signature(
+        AgentMessage(
+            correlation_id=correlation_id,
+            sender=AgentId.USER,
+            recipient=AgentId.TEAM_LEAD,
+            message_type=MessageType.TASK_ASSIGNMENT,
+            priority=Priority.P2,
+            payload=TaskAssignmentPayload(
+                task_id=root_task_id,
+                title="iter-5 exception path",
+                description="Backend will crash; dispatcher must synthesise.",
+            ),
+        )
+    )
+
+    async with session_factory() as session:
+        session.add(
+            Task(
+                id=root_task_id,
+                correlation_id=correlation_id,
+                title="iter-5 exception path",
+                description="Backend will crash; dispatcher must synthesise.",
+                status="in_progress",
+                assigned_agent=AgentId.TEAM_LEAD.value,
+                priority=Priority.P2.value,
+                iteration=5,
+            )
+        )
+        await session.commit()
+
+    try:
+        await audit.write_message(user_msg, iteration=5)
+        await bus.publish(user_msg)
+
+        # Wait for a synthesised TASK_REPORT(failed) row from Backend.
+        # Chain: user→TL, TL→broadcast (DAG preview), TL→be, be→TL (synth failed).
+        deadline = asyncio.get_event_loop().time() + 15
+        failed_rows: list[AuditLog] = []
+        while asyncio.get_event_loop().time() < deadline:
+            async with session_factory() as session:
+                failed_rows = list(
+                    (
+                        await session.execute(
+                            select(AuditLog)
+                            .where(AuditLog.correlation_id == correlation_id)
+                            .where(AuditLog.sender == AgentId.BACKEND_DEVELOPER.value)
+                            .where(AuditLog.message_type == MessageType.TASK_REPORT.value)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            if failed_rows:
+                break
+            await asyncio.sleep(0.2)
+
+        assert failed_rows, "no synthesised TASK_REPORT(failed) from Backend after 15s"
+        row = failed_rows[0]
+        payload = row.payload_json.get("payload", {})
+        assert payload.get("status") == TaskStatus.FAILED.value
+        # Summary carries the exception type per the synthesis helper.
+        assert "RuntimeError" in payload.get("summary", "")
+
+        # Root Task rolled up to failed via derive_parent_status
+        # (any-failed dominates per iter-3 rule).
+        deadline = asyncio.get_event_loop().time() + 5
+        root_status = "in_progress"
+        while asyncio.get_event_loop().time() < deadline:
+            async with session_factory() as session:
+                root = (
+                    await session.execute(select(Task).where(Task.id == root_task_id))
+                ).scalar_one()
+            root_status = root.status
+            if root_status == "failed":
+                break
+            await asyncio.sleep(0.2)
+        assert root_status == "failed", f"root rollup expected 'failed', got {root_status!r}"
+    finally:
+        dispatcher.shutdown()
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except (TimeoutError, asyncio.CancelledError):
+            task.cancel()
+        await bus.close()
+        await feed.close()
