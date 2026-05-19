@@ -1,7 +1,11 @@
-"""DevOps agent. Sonnet-tier. Modifies infra/, .github/workflows/, Makefile.
+"""Frontend Developer agent. Sonnet-tier. Writes UI code under apps/web, apps/cli.
 
-Per ADR-001 / ADR-004 (path scope: infra+workflows+Makefile+compose+scripts)
-/ ADR-006 (Sonnet).
+Per ADR-001 / ADR-004 (path scope: apps/web + apps/cli for ai_team's own
+surfaces; target repos override AI_TEAM_PATH_PREFIXES per-task) /
+ADR-006 (Sonnet).
+
+Mirrors DevOpsAgent's shape: emits BLOCKED to TL when an ask requires
+Backend territory; TL routes the unblock automatically (Phase 4).
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BLOCKED_RE = re.compile(r"blocked:\s*requires\s+(\w+)", re.IGNORECASE)
 
 
-DEVOPS_REPORT_SCHEMA: dict[str, object] = {
+FRONTEND_REPORT_SCHEMA: dict[str, object] = {
     "type": "object",
     "required": ["target_files", "changes", "rationale", "validation_step", "branch"],
     "additionalProperties": False,
@@ -43,14 +47,14 @@ DEVOPS_REPORT_SCHEMA: dict[str, object] = {
         "pr_url": {"type": "string"},
         "branch": {
             "type": "string",
-            "pattern": r"^agent/devops/[a-zA-Z0-9._\-/]+$",
+            "pattern": r"^agent/frontend/[a-zA-Z0-9._\-/]+$",
         },
     },
 }
 
 
-class DevOpsAgent(BaseAgent):
-    role: ClassVar[AgentId] = AgentId.DEVOPS
+class FrontendDeveloperAgent(BaseAgent):
+    role: ClassVar[AgentId] = AgentId.FRONTEND_DEVELOPER
     model_tier: ClassVar = "sonnet"
     allowed_tools: ClassVar[tuple[str, ...]] = (
         "Read",
@@ -66,10 +70,11 @@ class DevOpsAgent(BaseAgent):
         "mcp__ai_team_tasks__mark_task_done",
         "mcp__ai_team_tasks__request_human_review",
     )
-    system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "devops.md"
-    # Per ADR-004: write only to infra, CI workflows, Makefile, compose, scripts.
+    system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "frontend_developer.md"
+    # Per ADR-004: ai_team's own surfaces are apps/web + apps/cli. Target
+    # repos override AI_TEAM_PATH_PREFIXES per-task at MCP spawn time.
     mcp_env: ClassVar[dict[str, str]] = {
-        "AI_TEAM_PATH_PREFIXES": ("infra,.github/workflows,Makefile,docker-compose.yml,scripts"),
+        "AI_TEAM_PATH_PREFIXES": "apps/web,apps/cli",
     }
     llm_timeout_s: ClassVar[int] = 600
     max_turns: ClassVar[int] = 20
@@ -82,7 +87,10 @@ class DevOpsAgent(BaseAgent):
         if not report or "changes" not in report:
             return [
                 self._report(
-                    incoming, TaskStatus.FAILED, "DevOps: LLM did not return a parseable report", []
+                    incoming,
+                    TaskStatus.FAILED,
+                    "Frontend: LLM did not return a parseable report",
+                    [],
                 )
             ]
 
@@ -91,14 +99,15 @@ class DevOpsAgent(BaseAgent):
         validation = str(report.get("validation_step", "")).strip()
         pr_url = str(report.get("pr_url", "")).strip()
 
-        # "blocked: requires Backend" or "blocked: ..." → escalate to TL.
-        # Populate blocked_on so TL can auto-route without re-parsing summary.
+        # "blocked: requires <role>" → escalate to TL with the parsed role
+        # on TaskReportPayload.blocked_on so TL can auto-route without
+        # re-parsing summary text.
         if validation.lower().startswith("blocked"):
             return [
                 self._report(
                     incoming,
                     TaskStatus.BLOCKED,
-                    f"DevOps blocked: {validation}",
+                    f"Frontend blocked: {validation}",
                     target_files,
                     blocked_on=_parse_blocked_role(validation),
                 )
@@ -124,7 +133,7 @@ class DevOpsAgent(BaseAgent):
             session_id=str(msg.correlation_id),
             timeout_s=self.llm_timeout_s,
             max_turns=self.max_turns,
-            json_schema=DEVOPS_REPORT_SCHEMA,
+            json_schema=FRONTEND_REPORT_SCHEMA,
             env=dict(self.mcp_env) if self.mcp_env else None,
         )
         return self.build_outputs(response, msg)
@@ -141,7 +150,7 @@ class DevOpsAgent(BaseAgent):
         assert isinstance(incoming.payload, TaskAssignmentPayload)
         return AgentMessage(
             correlation_id=incoming.correlation_id,
-            sender=AgentId.DEVOPS,
+            sender=AgentId.FRONTEND_DEVELOPER,
             recipient=AgentId.TEAM_LEAD,
             message_type=MessageType.TASK_REPORT,
             priority=incoming.priority,

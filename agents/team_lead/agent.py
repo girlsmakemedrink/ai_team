@@ -6,6 +6,7 @@ digests).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 from uuid import uuid4
@@ -27,6 +28,14 @@ if TYPE_CHECKING:
     from core.llm.base import LLMResponse
 
 _log = structlog.get_logger(__name__)
+
+# Marker the TL inserts in auto-routed task descriptions; it also blocks
+# a second auto-route to prevent BLOCKED-ping-pong (DevOps → Backend →
+# DevOps → ...). One auto-hop is allowed; further BLOCKED reports on the
+# same chain surface in the digest for the owner.
+_AUTO_ROUTED_MARKER = "auto-routed"
+_BLOCKED_SUMMARY_RE = re.compile(r"blocked:\s*requires\s+(\w+)", re.IGNORECASE)
+
 
 # JSON schema enforced via --json-schema in the LLM call.
 DECOMPOSITION_SCHEMA: dict[str, object] = {
@@ -118,6 +127,8 @@ class TeamLeadAgent(BaseAgent):
     # Override to attach the schema. We don't need session_id on TL since
     # decompositions are single-turn.
     async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
+        if msg.message_type == MessageType.TASK_REPORT:
+            return self._maybe_route_blocked(msg)
         if msg.message_type != MessageType.TASK_ASSIGNMENT:
             self._log.debug("tl.skip", message_type=msg.message_type.value)
             return []
@@ -132,6 +143,76 @@ class TeamLeadAgent(BaseAgent):
             json_schema=DECOMPOSITION_SCHEMA,
         )
         return self.build_outputs(response, msg)
+
+    def _maybe_route_blocked(self, msg: AgentMessage) -> list[AgentMessage]:
+        """Route a BLOCKED task_report to the indicated role.
+
+        Pure dispatch — no LLM call. Saves an Opus turn on every routing
+        hop. Returns an empty list when there's nothing to do (the owner
+        sees the BLOCKED report in the digest as before).
+        """
+        if not isinstance(msg.payload, TaskReportPayload):
+            return []
+        if msg.payload.status != TaskStatus.BLOCKED:
+            return []
+
+        # Anti-loop: if the BLOCKED report was already an auto-routed
+        # follow-up, refuse to re-route a second time. The chain stops
+        # and the owner sees it in the digest.
+        if _AUTO_ROUTED_MARKER in msg.payload.summary.lower():
+            self._log.info(
+                "tl.blocked_route_skipped_already_routed",
+                sender=msg.sender.value,
+                correlation_id=str(msg.correlation_id),
+            )
+            return []
+
+        target = self._parse_blocked_target(msg.payload)
+        if target is None or target == AgentId.TEAM_LEAD:
+            return []
+        self._log.info(
+            "tl.blocked_route",
+            from_=msg.sender.value,
+            to=target.value,
+            correlation_id=str(msg.correlation_id),
+        )
+        return [
+            AgentMessage(
+                correlation_id=msg.correlation_id,
+                sender=AgentId.TEAM_LEAD,
+                recipient=target,
+                message_type=MessageType.TASK_ASSIGNMENT,
+                priority=msg.priority,
+                payload=TaskAssignmentPayload(
+                    task_id=uuid4(),
+                    title=f"Unblock: {msg.payload.summary[:160]}",
+                    description=(
+                        f"[{_AUTO_ROUTED_MARKER} from {msg.sender.value}] "
+                        f"{msg.sender.value} reported BLOCKED on this work. "
+                        f"Their summary:\n\n{msg.payload.summary}\n\n"
+                        f"Resolve the prerequisite, then report back to "
+                        f"the Team Lead."
+                    ),
+                ),
+            )
+        ]
+
+    @staticmethod
+    def _parse_blocked_target(payload: TaskReportPayload) -> AgentId | None:
+        # Preferred: explicit `blocked_on` field on the payload.
+        if payload.blocked_on:
+            try:
+                return AgentId(payload.blocked_on)
+            except ValueError:
+                pass
+        # Fallback: parse "blocked: requires <role>" from the summary.
+        m = _BLOCKED_SUMMARY_RE.search(payload.summary)
+        if m:
+            try:
+                return AgentId(m.group(1).lower())
+            except ValueError:
+                return None
+        return None
 
     def _fail_report(self, incoming: AgentMessage, reason: str) -> AgentMessage:
         payload_task_id = (
