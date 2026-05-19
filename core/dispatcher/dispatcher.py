@@ -14,7 +14,7 @@ from uuid import UUID
 import structlog
 
 from core.dispatcher.hold_queue import HoldQueue
-from core.messaging.schemas import TaskReportPayload, TaskStatus
+from core.messaging.schemas import MessageType, TaskAssignmentPayload, TaskReportPayload, TaskStatus
 from core.observability.logging import bind_correlation_id, clear_correlation_id
 from core.observability.metrics import (
     agent_errors_total,
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from core.messaging.bus import MessageBus
     from core.messaging.feed import FeedPublisher
     from core.messaging.schemas import AgentId, AgentMessage
+    from core.persistence.task_state import TaskStateReducer
 
 _log = structlog.get_logger(__name__)
 
@@ -45,6 +46,7 @@ class AgentDispatcher:
         agents: dict[AgentId, BaseAgent],
         iteration: int | None = None,
         hold_queue: HoldQueue | None = None,
+        task_state: TaskStateReducer | None = None,
     ) -> None:
         self._bus = bus
         self._feed = feed
@@ -53,6 +55,11 @@ class AgentDispatcher:
         self._agents = agents
         self._iteration = iteration
         self._hold_queue = hold_queue or HoldQueue()
+        # Optional: when provided, the dispatcher writes child Task rows
+        # and rolls parent status up from child terminals. None disables
+        # the bookkeeping (used by tests that don't care about the rollup
+        # and by environments that haven't set up the tasks table yet).
+        self._task_state = task_state
         self._shutdown = asyncio.Event()
 
     async def run(self) -> None:
@@ -132,6 +139,12 @@ class AgentDispatcher:
                 await self._audit.write_message(signed, iteration=self._iteration)
                 await self._feed.publish(signed)
 
+                # Task-state bookkeeping. Sub-task assignments insert
+                # child rows so the rollup has something to track.
+                # task_reports update the matching child + flip the
+                # parent when all children are terminal.
+                await self._maybe_record_task_state(signed)
+
                 # Dependency-aware bus publish.
                 depends_on = _parse_depends_on(signed)
                 held = await self._hold_queue.hold(signed, depends_on) if depends_on else False
@@ -165,6 +178,45 @@ class AgentDispatcher:
             await self._bus.ack(agent.role, entry_id)
         finally:
             clear_correlation_id(token)
+
+    async def _maybe_record_task_state(self, msg: AgentMessage) -> None:
+        """Forward task lifecycle events to the TaskStateReducer if wired."""
+        if self._task_state is None:
+            return
+        if msg.message_type == MessageType.TASK_ASSIGNMENT and isinstance(
+            msg.payload, TaskAssignmentPayload
+        ):
+            parent_raw = msg.metadata.get("parent_task_id")
+            if not isinstance(parent_raw, str):
+                # Root assignments (e.g. user → TL) carry no parent; no
+                # child row to insert.
+                return
+            try:
+                parent_task_id = UUID(parent_raw)
+            except ValueError:
+                _log.warning(
+                    "dispatcher.task_state.bad_parent_uuid",
+                    parent_raw=parent_raw,
+                    message_id=str(msg.message_id),
+                )
+                return
+            await self._task_state.on_assignment(
+                child_task_id=msg.payload.task_id,
+                parent_task_id=parent_task_id,
+                correlation_id=msg.correlation_id,
+                recipient=msg.recipient.value,
+                title=msg.payload.title,
+                description=msg.payload.description,
+                priority=msg.priority.value,
+                target_repo=msg.payload.target_repo,
+                iteration=self._iteration,
+            )
+        elif msg.message_type == MessageType.TASK_REPORT and isinstance(
+            msg.payload, TaskReportPayload
+        ):
+            await self._task_state.on_report(
+                task_id=msg.payload.task_id, status=msg.payload.status.value
+            )
 
 
 def _parse_depends_on(msg: AgentMessage) -> set[UUID]:

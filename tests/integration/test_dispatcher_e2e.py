@@ -30,7 +30,8 @@ from core.messaging.schemas import (
     TaskReportPayload,
     TaskStatus,
 )
-from core.persistence.models import AuditLog, FeedEvent
+from core.persistence.models import AuditLog, FeedEvent, Task
+from core.persistence.task_state import TaskStateReducer
 from core.security.hmac_signer import HMACSigner
 
 if TYPE_CHECKING:
@@ -388,6 +389,7 @@ async def test_dependency_ordered_three_stage_chain(
         ),
         AgentId.QA_ENGINEER: _StaticDoneAgent(role=AgentId.QA_ENGINEER, observer=qa_received),
     }
+    task_state = TaskStateReducer(session_factory)
     dispatcher = AgentDispatcher(
         bus=bus,
         feed=feed,
@@ -395,11 +397,13 @@ async def test_dependency_ordered_three_stage_chain(
         signer=signer,
         agents=agents,
         iteration=3,
+        task_state=task_state,
     )
 
     task = asyncio.create_task(dispatcher.run())
 
     correlation_id = uuid4()
+    root_task_id = uuid4()
     user_msg = signer.with_signature(
         AgentMessage(
             correlation_id=correlation_id,
@@ -408,12 +412,28 @@ async def test_dependency_ordered_three_stage_chain(
             message_type=MessageType.TASK_ASSIGNMENT,
             priority=Priority.P2,
             payload=TaskAssignmentPayload(
-                task_id=uuid4(),
+                task_id=root_task_id,
                 title="3-stage e2e",
                 description="Validate dependency ordering.",
             ),
         )
     )
+
+    # Emulate the API: insert the root Task row when the user submits.
+    async with session_factory() as session:
+        session.add(
+            Task(
+                id=root_task_id,
+                correlation_id=correlation_id,
+                title="3-stage e2e",
+                description="Validate dependency ordering.",
+                status="in_progress",
+                assigned_agent=AgentId.TEAM_LEAD.value,
+                priority=Priority.P2.value,
+                iteration=3,
+            )
+        )
+        await session.commit()
 
     try:
         await audit.write_message(user_msg, iteration=3)
@@ -488,6 +508,22 @@ async def test_dependency_ordered_three_stage_chain(
             assert items == [], f"held messages remain at end of test: cid={cid} items={items}"
 
         assert llm.calls == ["team_lead"]
+
+        # Root-task rollup: three children inserted, each marked `done`,
+        # parent flipped to `done`.
+        async with session_factory() as session:
+            children = (
+                (await session.execute(select(Task).where(Task.parent_task_id == root_task_id)))
+                .scalars()
+                .all()
+            )
+            root = (await session.execute(select(Task).where(Task.id == root_task_id))).scalar_one()
+        assert len(children) == 3, f"expected 3 child rows, got {len(children)}"
+        child_statuses = sorted(c.status for c in children)
+        assert child_statuses == ["done", "done", "done"], (
+            f"unexpected child statuses: {child_statuses}"
+        )
+        assert root.status == "done", f"root.status={root.status!r}; expected 'done'"
     finally:
         dispatcher.shutdown()
         try:
