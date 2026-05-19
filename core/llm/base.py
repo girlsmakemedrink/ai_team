@@ -106,9 +106,9 @@ PRICE_TABLE_CENTS_PER_MTOK: dict[str, tuple[int, int]] = {
 # Tight defaults protect runaway loops; agents that need more should
 # override per-call.
 DEFAULT_MAX_BUDGET_USD_PER_TIER: dict[ModelTier, float] = {
-    "haiku": 0.10,
-    "sonnet": 0.50,
-    "opus": 2.00,
+    "haiku": 0.30,
+    "sonnet": 1.50,
+    "opus": 4.00,
 }
 
 
