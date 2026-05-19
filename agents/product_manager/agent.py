@@ -153,4 +153,4 @@ class ProductManagerAgent(BaseAgent):
             max_turns=self.max_turns,
             json_schema=USER_STORIES_SCHEMA,
         )
-        return self.build_outputs(response, msg)
+        return self._stamp_metrics(self.build_outputs(response, msg), response)

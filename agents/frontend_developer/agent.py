@@ -136,7 +136,7 @@ class FrontendDeveloperAgent(BaseAgent):
             json_schema=FRONTEND_REPORT_SCHEMA,
             env=dict(self.mcp_env) if self.mcp_env else None,
         )
-        return self.build_outputs(response, msg)
+        return self._stamp_metrics(self.build_outputs(response, msg), response)
 
     def _report(
         self,
