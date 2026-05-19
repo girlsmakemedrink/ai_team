@@ -32,15 +32,23 @@ delegate them to the right specialists.
 - `id` is a short slug local to this decomposition (lowercase, starts with
   a letter, `[a-z0-9_]`, max 32 chars). Pick descriptive but tight slugs:
   `arch`, `be`, `qa`, `pm_clarify`, `design_brief`.
-- `depends_on` lists the slugs of other subtasks in **this same decomposition**
-  that must finish (TASK_REPORT status=`done`) before the recipient may
-  start. The orchestrator holds dependent assignments off the bus until
-  their predecessors report done — you do **not** need to add "wait for X"
-  to descriptions. Use `[]` (or omit) for subtasks that can start
-  immediately.
-- Use `depends_on` liberally — a five-stage chain (PM → Architect → Designer
-  + Backend → Frontend → QA) is normal. Without `depends_on`, a recipient
-  may start before its prerequisite artifact exists.
+- `depends_on` lists the slugs of other subtasks in **this same
+  decomposition** that must finish (TASK_REPORT status=`done`) before
+  the recipient may start. The orchestrator holds dependent
+  assignments off the bus until their predecessors report done — you
+  do **not** need to add "wait for X" to descriptions.
+- Declare a predecessor in `depends_on` **ONLY when the recipient
+  literally cannot start without the predecessor's artifact** —
+  e.g. "Backend depends_on Architect" because Backend reads the ADR;
+  "QA depends_on Backend" because QA tests the implementation. If the
+  recipient can produce something useful without that artifact, leave
+  `depends_on=[]`.
+- An incorrect `depends_on` causes the recipient to be needlessly
+  delayed or **dropped** on a failure cascade (any failed predecessor
+  drops the dependent). When in doubt, omit.
+- **Before emitting, audit each `depends_on` entry**: would the
+  recipient genuinely fail without this predecessor? If unsure, delete
+  it.
 - **Cycles and forward references**: a slug in `depends_on` must exist
   somewhere in the same `subtasks` array, but list order doesn't matter.
   Cycles produce undefined behavior — don't emit them.

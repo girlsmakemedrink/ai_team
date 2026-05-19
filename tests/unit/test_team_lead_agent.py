@@ -398,3 +398,19 @@ def test_build_outputs_returns_fail_report_when_no_subtasks() -> None:
     payload = outputs[0].payload
     assert isinstance(payload, TaskReportPayload)
     assert payload.status == TaskStatus.FAILED
+
+
+# === iter-4 Phase 3: pin conservative depends_on rule wording ===
+
+
+def test_tl_prompt_includes_conservative_depends_on_rule() -> None:
+    """Pin the iter-4 rule wording so a future prompt edit doesn't
+    silently revert the discipline. See iter_3_demo_report.md Failure 3
+    (TL added depends_on=[backend, design] on Frontend despite the v2
+    spec saying the landing page is static)."""
+    prompt_path = TeamLeadAgent.system_prompt_path
+    text = prompt_path.read_text()
+    assert "literally cannot start without" in text, (
+        "TL prompt must teach conservative depends_on — see iter_4.md Phase 3"
+    )
+    assert "Before emitting, audit each `depends_on` entry" in text
