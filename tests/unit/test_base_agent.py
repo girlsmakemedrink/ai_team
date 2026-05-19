@@ -230,3 +230,44 @@ def test_handle_records_validated_false_when_schema_failed(tmp_path: Path) -> No
     llm_meta = outputs[0].metadata.get("llm")
     assert isinstance(llm_meta, dict)
     assert llm_meta["validated_against_schema"] is False
+
+
+# === iter-9 Phase 2: pre-flight MCP health check in handle() ===
+
+
+def test_handle_raises_mcp_unhealthy_and_skips_llm_invoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When AI_TEAM_MCP_CONFIG_PATH points to a config whose
+    declared module fails to import, handle() raises
+    MCPUnhealthyError BEFORE the LLM is invoked. The MockLLM's
+    call list stays empty. See iter_9.md success criterion #3
+    + iter_8_demo_report.md Failure 1."""
+    from core.llm.base import MCPUnhealthyError
+
+    config = tmp_path / "mcp.json"
+    config.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "ai-team-broken": {
+                        "command": "python",
+                        "args": [
+                            "-m",
+                            "tools.mcp_servers.nonexistent_xyz_iter9",
+                        ],
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("AI_TEAM_MCP_CONFIG_PATH", str(config))
+
+    _EchoingAgent.system_prompt_path = tmp_path / "p.md"
+    _EchoingAgent.system_prompt_path.write_text("# Role: Backend Developer\nstub")
+    mock_llm = MockLLMClient(tmp_path, strict=False)
+    agent = _EchoingAgent(llm=mock_llm)
+
+    with pytest.raises(MCPUnhealthyError, match="ai-team-broken"):
+        asyncio.run(agent.handle(_make_assignment()))
+    assert mock_llm.calls == []  # LLM never reached

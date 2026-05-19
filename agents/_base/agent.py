@@ -17,6 +17,7 @@ shape (e.g. Team Lead with periodic checkpoints), override handle() entirely.
 from __future__ import annotations
 
 import json
+import os
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar
 
@@ -28,7 +29,8 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from core.llm.base import LLMTimeoutError, ModelTier
+from core.llm.base import LLMTimeoutError, MCPUnhealthyError, ModelTier
+from core.llm.mcp_health import check_mcp_servers
 from core.security.sanitizer import wrap_untrusted
 
 if TYPE_CHECKING:
@@ -83,6 +85,18 @@ class BaseAgent(ABC):
 
     async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
         """Default LLM-backed processing. Subclasses can override."""
+        # iter-9: pre-flight MCP health-gate. Catches deterministic
+        # startup failures (module import errors, AI_TEAM_REPO_ROOT
+        # misconfiguration) before claude -p spawns the MCP server
+        # subprocess. Failures route to BLOCKED(mcp_unhealthy) via
+        # the dispatcher's iter-9 special-case, dependents stay
+        # held instead of cascade-dropping. Silent skip when
+        # AI_TEAM_MCP_CONFIG_PATH is unset (mocked-LLM unit tests).
+        unhealthy = check_mcp_servers(os.environ.get("AI_TEAM_MCP_CONFIG_PATH"))
+        if unhealthy:
+            raise MCPUnhealthyError(
+                f"MCP servers unhealthy ({len(unhealthy)}): " + "; ".join(unhealthy)
+            )
         user_msg = self._user_message_for(msg)
         response = await self._invoke_with_retries(
             system_prompt=self.system_prompt(),
