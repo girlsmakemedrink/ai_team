@@ -210,9 +210,7 @@ async def test_user_to_tl_to_pm_to_report(
         assert "product_manager" in senders, f"senders={senders} debug={debug}"
         # iter-4: TL must emit exactly one DAG preview broadcast alongside
         # the task assignment.
-        assert message_types.count("broadcast") == 1, (
-            f"message_types={message_types} debug={debug}"
-        )
+        assert message_types.count("broadcast") == 1, f"message_types={message_types} debug={debug}"
 
         # Chain verification is covered by test_audit_writer (which
         # intentionally tampers with rows). Here we just check that the

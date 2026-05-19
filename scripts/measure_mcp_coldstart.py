@@ -5,6 +5,7 @@ ai_team_repo via both invocation modes. Reports median + p95.
 
 Usage: uv run python scripts/measure_mcp_coldstart.py
 """
+
 from __future__ import annotations
 
 import asyncio
