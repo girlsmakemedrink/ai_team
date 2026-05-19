@@ -10,6 +10,7 @@ Backend territory; TL routes the unblock automatically (Phase 4).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
 _log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_BLOCKED_RE = re.compile(r"blocked:\s*requires\s+(\w+)", re.IGNORECASE)
 
 
 FRONTEND_REPORT_SCHEMA: dict[str, object] = {
@@ -97,9 +99,9 @@ class FrontendDeveloperAgent(BaseAgent):
         validation = str(report.get("validation_step", "")).strip()
         pr_url = str(report.get("pr_url", "")).strip()
 
-        # "blocked: requires Backend" or "blocked: ..." → escalate to TL.
-        # Phase 4 lifts the parsed role onto TaskReportPayload.blocked_on so
-        # TL can auto-route. For Phase 2 we ship the BLOCKED status only.
+        # "blocked: requires <role>" → escalate to TL with the parsed role
+        # on TaskReportPayload.blocked_on so TL can auto-route without
+        # re-parsing summary text.
         if validation.lower().startswith("blocked"):
             return [
                 self._report(
@@ -107,6 +109,7 @@ class FrontendDeveloperAgent(BaseAgent):
                     TaskStatus.BLOCKED,
                     f"Frontend blocked: {validation}",
                     target_files,
+                    blocked_on=_parse_blocked_role(validation),
                 )
             ]
 
@@ -141,6 +144,8 @@ class FrontendDeveloperAgent(BaseAgent):
         status: TaskStatus,
         summary: str,
         artifacts: list[str],
+        *,
+        blocked_on: str | None = None,
     ) -> AgentMessage:
         assert isinstance(incoming.payload, TaskAssignmentPayload)
         return AgentMessage(
@@ -155,5 +160,18 @@ class FrontendDeveloperAgent(BaseAgent):
                 progress_pct=100 if status == TaskStatus.DONE else 0,
                 summary=summary,
                 artifacts=artifacts,
+                blocked_on=blocked_on,
             ),
         )
+
+
+def _parse_blocked_role(validation: str) -> str | None:
+    """Extract the role from `blocked: requires <role>` if it resolves
+    to a known AgentId, else None."""
+    m = _BLOCKED_RE.search(validation)
+    if not m:
+        return None
+    try:
+        return AgentId(m.group(1).lower()).value
+    except ValueError:
+        return None

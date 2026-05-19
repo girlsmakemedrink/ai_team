@@ -111,9 +111,13 @@ async def test_handle_reports_done_with_pr_url() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_marks_blocked_when_validation_says_blocked() -> None:
-    """Frontend must escalate to TL when the ask requires Backend territory."""
+    """Frontend must escalate to TL when the ask requires Backend territory.
+
+    Phase 4: the parsed role lands on TaskReportPayload.blocked_on so TL
+    can auto-route without re-parsing summary text.
+    """
     response = _frontend_response(
-        validation_step="blocked: requires Backend (new API endpoint in apps/api/main.py)"
+        validation_step="blocked: requires backend_developer (new API endpoint in apps/api/main.py)"
     )
     agent = FrontendDeveloperAgent(llm=_StubLLM(response))
     outputs = await agent.handle(_task())
@@ -121,7 +125,8 @@ async def test_handle_marks_blocked_when_validation_says_blocked() -> None:
     payload = outputs[0].payload
     assert isinstance(payload, TaskReportPayload)
     assert payload.status.value == "blocked"
-    assert "requires Backend" in payload.summary
+    assert "requires backend_developer" in payload.summary
+    assert payload.blocked_on == "backend_developer"
 
 
 @pytest.mark.asyncio

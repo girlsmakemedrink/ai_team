@@ -6,6 +6,7 @@ Per ADR-001 / ADR-004 (path scope: infra+workflows+Makefile+compose+scripts)
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 _log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_BLOCKED_RE = re.compile(r"blocked:\s*requires\s+(\w+)", re.IGNORECASE)
 
 
 DEVOPS_REPORT_SCHEMA: dict[str, object] = {
@@ -90,10 +92,15 @@ class DevOpsAgent(BaseAgent):
         pr_url = str(report.get("pr_url", "")).strip()
 
         # "blocked: requires Backend" or "blocked: ..." → escalate to TL.
+        # Populate blocked_on so TL can auto-route without re-parsing summary.
         if validation.lower().startswith("blocked"):
             return [
                 self._report(
-                    incoming, TaskStatus.BLOCKED, f"DevOps blocked: {validation}", target_files
+                    incoming,
+                    TaskStatus.BLOCKED,
+                    f"DevOps blocked: {validation}",
+                    target_files,
+                    blocked_on=_parse_blocked_role(validation),
                 )
             ]
 
@@ -128,6 +135,8 @@ class DevOpsAgent(BaseAgent):
         status: TaskStatus,
         summary: str,
         artifacts: list[str],
+        *,
+        blocked_on: str | None = None,
     ) -> AgentMessage:
         assert isinstance(incoming.payload, TaskAssignmentPayload)
         return AgentMessage(
@@ -142,5 +151,18 @@ class DevOpsAgent(BaseAgent):
                 progress_pct=100 if status == TaskStatus.DONE else 0,
                 summary=summary,
                 artifacts=artifacts,
+                blocked_on=blocked_on,
             ),
         )
+
+
+def _parse_blocked_role(validation: str) -> str | None:
+    """Extract the role from `blocked: requires <role>` if it resolves
+    to a known AgentId, else None."""
+    m = _BLOCKED_RE.search(validation)
+    if not m:
+        return None
+    try:
+        return AgentId(m.group(1).lower()).value
+    except ValueError:
+        return None

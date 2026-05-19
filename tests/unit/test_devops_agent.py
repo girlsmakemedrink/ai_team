@@ -103,16 +103,37 @@ async def test_handle_reports_done_with_pr_url() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_marks_blocked_when_validation_says_blocked() -> None:
-    """DevOps must escalate to TL when the ask requires Backend territory."""
+    """DevOps must escalate to TL when the ask requires Backend territory.
+
+    Phase 4: the parsed role lands on TaskReportPayload.blocked_on so TL
+    can auto-route without re-parsing summary text.
+    """
     response = _devops_response(
-        validation_step="blocked: requires Backend (agents/foo/bar.py change)"
+        validation_step="blocked: requires backend_developer (agents/foo/bar.py change)"
     )
     agent = DevOpsAgent(llm=_StubLLM(response))
     outputs = await agent.handle(_task())
     payload = outputs[0].payload
     assert isinstance(payload, TaskReportPayload)
     assert payload.status.value == "blocked"
-    assert "requires Backend" in payload.summary
+    assert "requires backend_developer" in payload.summary
+    assert payload.blocked_on == "backend_developer"
+
+
+@pytest.mark.asyncio
+async def test_handle_blocked_with_unparseable_role_sets_blocked_on_none() -> None:
+    """If the validation_step is generic 'blocked: <reason>' with no
+    parseable role, blocked_on stays None and TL leaves it for the owner.
+    """
+    response = _devops_response(
+        validation_step="blocked: docker daemon unreachable, no clear owner"
+    )
+    agent = DevOpsAgent(llm=_StubLLM(response))
+    outputs = await agent.handle(_task())
+    payload = outputs[0].payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status.value == "blocked"
+    assert payload.blocked_on is None
 
 
 @pytest.mark.asyncio
