@@ -17,6 +17,7 @@ from agents._base import BaseAgent
 from core.messaging.schemas import (
     AgentId,
     AgentMessage,
+    BroadcastPayload,
     MessageType,
     Priority,
     TaskAssignmentPayload,
@@ -173,7 +174,44 @@ class TeamLeadAgent(BaseAgent):
                     },
                 )
             )
+
+        # iter-4 Phase 4: emit a DAG-preview broadcast at index 0 so the
+        # owner sees the planned decomposition in `ai-team watch` before
+        # the per-subtask assignments hit the bus. Informational only;
+        # not a gate. See iter_3_demo_report.md Failure 3 for context.
+        if outputs:
+            outputs.insert(
+                0,
+                AgentMessage(
+                    correlation_id=incoming.correlation_id,
+                    sender=AgentId.TEAM_LEAD,
+                    recipient=AgentId.BROADCAST,
+                    message_type=MessageType.BROADCAST,
+                    priority=Priority.P3,
+                    payload=BroadcastPayload(
+                        topic="tl.dag_preview",
+                        body=self._render_dag_markdown(subtasks),
+                    ),
+                    metadata={"parent_task_id": str(incoming.payload.task_id)},
+                ),
+            )
         return outputs
+
+    @staticmethod
+    def _render_dag_markdown(subtasks: list[dict[str, object]]) -> str:
+        """Render a per-subtask depends_on summary the owner can scan in
+        `ai-team watch`. Bullet per subtask with slug → recipient and
+        any declared dependencies."""
+        lines: list[str] = ["## Decomposition plan"]
+        for sub in subtasks:
+            slug = sub.get("id", "?")
+            recipient = sub.get("recipient", "?")
+            deps_raw = sub.get("depends_on") or []
+            deps = [str(d) for d in deps_raw] if isinstance(deps_raw, list) else []
+            deps_str = f" depends_on=[{', '.join(deps)}]" if deps else ""
+            title = str(sub.get("title", ""))[:80]
+            lines.append(f"- **{slug}** → `{recipient}`{deps_str}: {title}")
+        return "\n".join(lines)
 
     # Override to attach the schema. We don't need session_id on TL since
     # decompositions are single-turn.

@@ -1,6 +1,6 @@
 # Iteration 0 — `claude -p` smoke report
 
-Date: 2026-05-18 20:08:32 UTC
+Date: 2026-05-19 09:50:26 UTC
 Result: **PASS ✓**
 
 See [ADR-008](../adr/0008-llm-access-strategy.md) for the validation contract.
@@ -12,9 +12,9 @@ See [ADR-008](../adr/0008-llm-access-strategy.md) for the validation contract.
   "concurrent_n": 5,
   "successes": 5,
   "errors": 0,
-  "total_wall_s": 16.98,
-  "max_ms": 16982,
-  "median_ms": 13214,
+  "total_wall_s": 12.09,
+  "max_ms": 12089,
+  "median_ms": 8387,
   "error_samples": []
 }
 ```
@@ -33,8 +33,8 @@ See [ADR-008](../adr/0008-llm-access-strategy.md) for the validation contract.
 {
   "passed": true,
   "tokens_input": 10,
-  "tokens_output": 159,
-  "cached_input": 26958,
+  "tokens_output": 236,
+  "cached_input": 27029,
   "cost_cents_estimated": 0,
   "session_id_present": true
 }
@@ -46,7 +46,7 @@ See [ADR-008](../adr/0008-llm-access-strategy.md) for the validation contract.
   "passed": true,
   "first_input_tokens": 10,
   "second_input_tokens": 10,
-  "second_cached_input_tokens": 40707,
+  "second_cached_input_tokens": 40721,
   "cache_pct": 100.0
 }
 ```
@@ -56,13 +56,13 @@ See [ADR-008](../adr/0008-llm-access-strategy.md) for the validation contract.
 {
   "passed": true,
   "latencies_ms": [
-    5070,
-    5628,
-    9437,
-    3846,
-    5582
+    5522,
+    7556,
+    5669,
+    5947,
+    7009
   ],
-  "median_ms": 5582,
-  "max_ms": 9437
+  "median_ms": 5947,
+  "max_ms": 7556
 }
 ```
