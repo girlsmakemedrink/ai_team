@@ -3,7 +3,7 @@
         test test-unit test-integration test-smoke test-real-llm \
         lint typecheck format format-check fix sec \
         migrate alembic-rev \
-        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 \
+        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 \
         clean
 
 help: ## Show available targets
@@ -96,9 +96,12 @@ alembic-rev: ## New alembic revision (usage: make alembic-rev MSG="description")
 smoke-llm: ## Validate `claude -p` substrate (ADR-008)
 	uv run python scripts/smoke_claude_p.py
 
-demo: demo-iter-3 ## Alias for the current iteration's demo
+demo: demo-iter-4 ## Alias for the current iteration's demo
 
-demo-iter-3: ## Run iter-3 e2e (PM → Arch → BE/Designer → FE → QA via depends_on)
+demo-iter-4: ## Run iter-4 e2e (direct-python MCP, depends_on DAG preview)
+	bash scripts/demo_iter_4.sh
+
+demo-iter-3: ## Run iter-3 e2e — regression baseline (uv-run MCP)
 	bash scripts/demo_iter_3.sh
 
 demo-iter-2: ## Run iter-2 end-to-end (TL → Architect → Backend → QA) — regression baseline
