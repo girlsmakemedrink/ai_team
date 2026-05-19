@@ -7,7 +7,7 @@ call needed)."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
@@ -183,7 +183,7 @@ async def test_skips_non_blocked_task_reports() -> None:
 # === depends_on / metadata stamping (iter-3 Phase 2) ===
 
 
-def _stub_llm_response(structured: dict[str, object]) -> LLMResponse:
+def _stub_llm_response(structured: dict[str, Any]) -> LLMResponse:
     """Build a minimal LLMResponse — only `structured` is exercised by build_outputs."""
     from core.llm.base import LLMResponse, TokensUsage  # local import to keep file lean
 

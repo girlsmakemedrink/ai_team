@@ -7,7 +7,8 @@ agent's system prompt is invoking it. No real `claude -p` calls.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 import pytest
@@ -35,8 +36,6 @@ from core.persistence.task_state import TaskStateReducer
 from core.security.hmac_signer import HMACSigner
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 pytestmark = pytest.mark.integration
@@ -245,23 +244,20 @@ async def test_user_to_tl_to_pm_to_report(
 # === iter-3 Phase 2D: three-stage dependency-ordered chain ===
 
 
-class _StaticDoneAgent(BaseAgent):
-    """Stub agent for the depends_on integration test.
+class _StaticDoneAgentBase(BaseAgent):
+    """Stub base: returns one TASK_REPORT(DONE) per incoming TASK_ASSIGNMENT.
 
-    On any TASK_ASSIGNMENT, returns a TASK_REPORT(DONE) carrying the same
-    task_id. The role / model_tier / system_prompt_path are all minimal
-    placeholders — this agent doesn't invoke the LLM.
+    Subclasses fix `role` as a ClassVar (mypy-friendly) and pass an
+    observer list to capture every message the dispatcher delivered.
     """
 
-    role: Any = AgentId.ARCHITECT  # overridden per-instance in fixture
-    model_tier: Any = "sonnet"
-    allowed_tools: tuple[str, ...] = ()
-    system_prompt_path: Path = None  # type: ignore[assignment]
+    system_prompt_path: ClassVar[Path] = Path("/dev/null")
 
-    def __init__(self, *, role: AgentId, observer: list[AgentMessage]) -> None:
-        self.role = role  # type: ignore[misc]
+    def __init__(self, *, observer: list[AgentMessage]) -> None:
+        # Intentionally skip BaseAgent.__init__ — the stub never calls
+        # the LLM and doesn't need a system prompt loader.
         self._observer = observer
-        self._llm = None  # not used
+        self._cached_prompt: str | None = None
 
     def system_prompt(self) -> str:
         return f"# Role: {self.role.value}\nStub agent for tests.\n"
@@ -293,8 +289,20 @@ class _StaticDoneAgent(BaseAgent):
         response: LLMResponse,
         incoming: AgentMessage,
     ) -> list[AgentMessage]:
-        del response, incoming  # not used by this stub; handle() builds outputs directly
+        del response, incoming  # stub's handle() builds outputs directly
         return []
+
+
+class _StubArchitect(_StaticDoneAgentBase):
+    role: ClassVar[AgentId] = AgentId.ARCHITECT
+
+
+class _StubBackend(_StaticDoneAgentBase):
+    role: ClassVar[AgentId] = AgentId.BACKEND_DEVELOPER
+
+
+class _StubQA(_StaticDoneAgentBase):
+    role: ClassVar[AgentId] = AgentId.QA_ENGINEER
 
 
 def _tl_three_stage_response() -> LLMResponse:
@@ -383,11 +391,9 @@ async def test_dependency_ordered_three_stage_chain(
 
     agents = {
         AgentId.TEAM_LEAD: TeamLeadAgent(llm=llm),
-        AgentId.ARCHITECT: _StaticDoneAgent(role=AgentId.ARCHITECT, observer=arch_received),
-        AgentId.BACKEND_DEVELOPER: _StaticDoneAgent(
-            role=AgentId.BACKEND_DEVELOPER, observer=be_received
-        ),
-        AgentId.QA_ENGINEER: _StaticDoneAgent(role=AgentId.QA_ENGINEER, observer=qa_received),
+        AgentId.ARCHITECT: _StubArchitect(observer=arch_received),
+        AgentId.BACKEND_DEVELOPER: _StubBackend(observer=be_received),
+        AgentId.QA_ENGINEER: _StubQA(observer=qa_received),
     }
     task_state = TaskStateReducer(session_factory)
     dispatcher = AgentDispatcher(
