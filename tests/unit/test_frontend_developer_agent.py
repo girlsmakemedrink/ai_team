@@ -93,7 +93,7 @@ def test_schema_pins_branch_pattern() -> None:
     from agents.frontend_developer.agent import FRONTEND_REPORT_SCHEMA
 
     branch_schema = FRONTEND_REPORT_SCHEMA["properties"]["branch"]  # type: ignore[index]
-    assert "agent/frontend/" in branch_schema["pattern"]  # type: ignore[index]
+    assert "agent/frontend/" in branch_schema["pattern"]
 
 
 @pytest.mark.asyncio
