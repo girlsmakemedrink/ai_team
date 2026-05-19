@@ -114,6 +114,13 @@ class ClaudeCodeHeadlessClient:
             system_prompt,
             "--max-budget-usd",
             f"{effective_budget:.4f}",
+            # iter-5: acceptEdits auto-accepts file edits / tool uses inside
+            # the agent's session so it doesn't stall on the interactive
+            # write-approval prompt that blocked Frontend in iter-4's demo.
+            # Defense-in-depth: dangerous shell commands still gate; per-MCP
+            # path scope is enforced by ai-team-repo's AI_TEAM_PATH_PREFIXES.
+            "--permission-mode",
+            "acceptEdits",
         ]
         if allowed_tools:
             cmd += ["--allowed-tools", ",".join(allowed_tools)]

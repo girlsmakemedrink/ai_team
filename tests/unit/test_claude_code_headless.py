@@ -281,3 +281,45 @@ def test_parse_response_tokens_populated(client: ClaudeCodeHeadlessClient) -> No
     assert resp.tokens.cached_input == 200
     assert resp.tokens.model == "claude-sonnet-4-6"
     assert resp.duration_ms == 42
+
+
+# === iter-5 Phase 2: --permission-mode acceptEdits ===
+
+
+@pytest.mark.asyncio
+async def test_invoke_passes_permission_mode_accept_edits() -> None:
+    """Adapter passes --permission-mode acceptEdits by default so agent
+    sessions don't stall on the interactive write-approval prompt that
+    blocked Frontend in the iter-4 demo. See iter_4_demo_report.md
+    Failure 2 + iter_5.md Phase 2."""
+    client = ClaudeCodeHeadlessClient()
+    captured_argvs: list[tuple[str, ...]] = []
+
+    class _FakeProc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            payload = {
+                "is_error": False,
+                "result": "ok",
+                "session_id": "sid",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+            return json.dumps(payload).encode(), b""
+
+    async def _fake_create(*cmd: str, **_: Any) -> _FakeProc:
+        captured_argvs.append(cmd)
+        return _FakeProc()
+
+    with patch(
+        "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+        new=AsyncMock(side_effect=_fake_create),
+    ):
+        await client.invoke(system_prompt="sp", user_message="u", model="haiku")
+
+    argv = captured_argvs[0]
+    assert "--permission-mode" in argv, f"argv missing --permission-mode: {argv}"
+    idx = argv.index("--permission-mode")
+    assert argv[idx + 1] == "acceptEdits", (
+        f"expected acceptEdits, got {argv[idx + 1]!r}"
+    )
