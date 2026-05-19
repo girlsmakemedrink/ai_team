@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import structlog
 
+from core.dispatcher.hold_queue import HoldQueue
+from core.messaging.schemas import TaskReportPayload, TaskStatus
 from core.observability.logging import bind_correlation_id, clear_correlation_id
 from core.observability.metrics import (
     agent_errors_total,
@@ -41,6 +44,7 @@ class AgentDispatcher:
         signer: HMACSigner,
         agents: dict[AgentId, BaseAgent],
         iteration: int | None = None,
+        hold_queue: HoldQueue | None = None,
     ) -> None:
         self._bus = bus
         self._feed = feed
@@ -48,6 +52,7 @@ class AgentDispatcher:
         self._signer = signer
         self._agents = agents
         self._iteration = iteration
+        self._hold_queue = hold_queue or HoldQueue()
         self._shutdown = asyncio.Event()
 
     async def run(self) -> None:
@@ -121,10 +126,58 @@ class AgentDispatcher:
 
             for out in outputs:
                 signed = self._signer.with_signature(out)
+                # Audit + feed-publish at intent time: the message exists,
+                # even if held off the bus. Owner observability is
+                # unaffected by the hold queue.
                 await self._audit.write_message(signed, iteration=self._iteration)
-                await self._bus.publish(signed)
                 await self._feed.publish(signed)
+
+                # Dependency-aware bus publish.
+                depends_on = _parse_depends_on(signed)
+                held = await self._hold_queue.hold(signed, depends_on) if depends_on else False
+                if not held:
+                    await self._bus.publish(signed)
+
+                # When this output is itself a terminal TASK_REPORT, fan out
+                # the consequences for any held dependents in the same
+                # correlation_id.
+                if isinstance(signed.payload, TaskReportPayload):
+                    if signed.payload.status == TaskStatus.DONE:
+                        released = await self._hold_queue.mark_done(
+                            signed.correlation_id, signed.payload.task_id
+                        )
+                        for r in released:
+                            # Already audited + feed-published at intent
+                            # time. Just push to the bus.
+                            await self._bus.publish(r)
+                    elif signed.payload.status == TaskStatus.FAILED:
+                        dropped = await self._hold_queue.mark_failed(
+                            signed.correlation_id, signed.payload.task_id
+                        )
+                        for d in dropped:
+                            _log.warning(
+                                "dispatcher.dependent_dropped_after_failure",
+                                correlation_id=str(d.correlation_id),
+                                message_id=str(d.message_id),
+                                failed_task_id=str(signed.payload.task_id),
+                            )
 
             await self._bus.ack(agent.role, entry_id)
         finally:
             clear_correlation_id(token)
+
+
+def _parse_depends_on(msg: AgentMessage) -> set[UUID]:
+    """Pull metadata['depends_on'] off the envelope as a set of UUIDs."""
+    raw = msg.metadata.get("depends_on") or []
+    if not isinstance(raw, list):
+        return set()
+    out: set[UUID] = set()
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        try:
+            out.add(UUID(item))
+        except ValueError:
+            continue
+    return out
