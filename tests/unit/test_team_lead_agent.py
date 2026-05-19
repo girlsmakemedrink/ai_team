@@ -7,13 +7,13 @@ call needed)."""
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 
 from agents.team_lead import TeamLeadAgent
 from agents.team_lead.agent import _AUTO_ROUTED_MARKER
-from core.llm.base import LLMResponse, TokensUsage
 from core.messaging.schemas import (
     AgentId,
     AgentMessage,
@@ -23,6 +23,9 @@ from core.messaging.schemas import (
     TaskReportPayload,
     TaskStatus,
 )
+
+if TYPE_CHECKING:
+    from core.llm.base import LLMResponse
 
 
 class _StubLLM:

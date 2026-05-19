@@ -43,7 +43,10 @@ def _sre_response(
         "title": "Dispatcher reports quota_exhausted",
         "slug": slug,
         "kind": kind,
-        "summary": "claude -p returns the quota-exhausted error; dispatcher refuses new tasks until quota rolls over.",
+        "summary": (
+            "claude -p returns the quota-exhausted error; "
+            "dispatcher refuses new tasks until quota rolls over."
+        ),
         "steps": (
             "1. Confirm via `ai-team digest` that the dispatcher state is "
             "`quota_exhausted`.\n"

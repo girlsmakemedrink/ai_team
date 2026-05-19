@@ -67,7 +67,7 @@ def _render_runbook_markdown(*, doc: dict[str, Any]) -> str:
     lines: list[str] = [
         f"# {kind.capitalize()} — {title}",
         "",
-        f"- **Status**: Draft (SRE agent; pending owner approval)",
+        "- **Status**: Draft (SRE agent; pending owner approval)",
         f"- **Severity**: {severity}",
         "",
         "## Summary",
