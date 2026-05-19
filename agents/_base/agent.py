@@ -83,11 +83,39 @@ class BaseAgent(ABC):
             user_message=user_msg,
             session_key=str(msg.correlation_id),
         )
-        return self.build_outputs(response, msg)
+        outputs = self.build_outputs(response, msg)
+        return self._stamp_metrics(outputs, response)
 
     @abstractmethod
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         """Translate the LLM response into outbound AgentMessages."""
+
+    @staticmethod
+    def _stamp_metrics(outputs: list[AgentMessage], response: LLMResponse) -> list[AgentMessage]:
+        """Attach per-turn LLM metrics to every output's metadata['llm'].
+
+        Same response object produces N outputs (TL emits 3 sub-task
+        assignments from one decomposition turn). Each output carries
+        the same metrics — they describe the LLM call that produced
+        them, not the message itself.
+
+        The metrics ride in AgentMessage.metadata (already on the
+        envelope) so they persist to audit_log.payload_json without
+        a schema bump. A single SQL query over the metadata path
+        reconstructs the demo report — see scripts/demo_iter_3.sh.
+        """
+        metrics = {
+            "tokens_in": response.tokens.input,
+            "tokens_out": response.tokens.output,
+            "cached_input": response.tokens.cached_input,
+            "cost_cents": response.cost_estimate_cents,
+            "duration_ms": response.duration_ms,
+            "model": response.tokens.model,
+            "validated_against_schema": response.validated_against_schema,
+        }
+        return [
+            out.model_copy(update={"metadata": {**out.metadata, "llm": metrics}}) for out in outputs
+        ]
 
     # ----- helpers subclasses may override -----
 

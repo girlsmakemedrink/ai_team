@@ -179,6 +179,8 @@ class TeamLeadAgent(BaseAgent):
     # decompositions are single-turn.
     async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
         if msg.message_type == MessageType.TASK_REPORT:
+            # Blocked-routing is pure dispatch (no LLM call), so no
+            # metrics to stamp.
             return self._maybe_route_blocked(msg)
         if msg.message_type != MessageType.TASK_ASSIGNMENT:
             self._log.debug("tl.skip", message_type=msg.message_type.value)
@@ -193,7 +195,8 @@ class TeamLeadAgent(BaseAgent):
             max_turns=self.max_turns,
             json_schema=DECOMPOSITION_SCHEMA,
         )
-        return self.build_outputs(response, msg)
+        outputs = self.build_outputs(response, msg)
+        return self._stamp_metrics(outputs, response)
 
     def _maybe_route_blocked(self, msg: AgentMessage) -> list[AgentMessage]:
         """Route a BLOCKED task_report to the indicated role.
