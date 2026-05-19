@@ -461,7 +461,7 @@ async def test_invoke_timeout_includes_buffered_stdout() -> None:
     async def _fake_create(*_cmd: str, **_kwargs: Any) -> _HangingProc:
         return _HangingProc()
 
-    async def _fake_wait_for(coro: Any, timeout: float) -> Any:  # noqa: ARG001
+    async def _fake_wait_for(coro: Any, timeout: float) -> Any:  # noqa: ASYNC109
         # Close the coroutine so the event loop doesn't warn about it.
         coro.close()
         raise TimeoutError("simulated wait_for timeout")
@@ -507,7 +507,7 @@ async def test_invoke_timeout_tolerates_drain_failure() -> None:
     async def _fake_create(*_cmd: str, **_kwargs: Any) -> _HangingProc:
         return _HangingProc()
 
-    async def _fake_wait_for(coro: Any, timeout: float) -> Any:  # noqa: ARG001
+    async def _fake_wait_for(coro: Any, timeout: float) -> Any:  # noqa: ASYNC109
         coro.close()
         raise TimeoutError("simulated wait_for timeout")
 
