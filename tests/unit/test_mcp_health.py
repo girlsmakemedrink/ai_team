@@ -71,6 +71,16 @@ def test_check_returns_empty_when_config_file_missing(tmp_path: Path) -> None:
     assert check_mcp_servers(bogus) == []
 
 
+def test_check_returns_empty_when_config_is_invalid_json(tmp_path: Path) -> None:
+    """Malformed JSON in the config is treated as 'no config' —
+    silent skip rather than raising. The adapter would also fail
+    to parse it, so failing the gate here would just preempt the
+    adapter's failure without adding information."""
+    path = tmp_path / "mcp.json"
+    path.write_text("{ not valid json")
+    assert check_mcp_servers(str(path)) == []
+
+
 def test_check_surfaces_import_error_by_name(tmp_path: Path) -> None:
     """If a server's module fails to import, the result names it.
     Reproduces the iter-8 demo failure mode in unit form."""
