@@ -196,7 +196,28 @@ class ClaudeCodeHeadlessClient:
         except TimeoutError as e:
             proc.kill()
             await proc.wait()
-            raise LLMTimeoutError(f"claude -p timed out after {timeout_s}s") from e
+            # iter-7: drain whatever buffered stdout the process flushed
+            # before the kill so the raised exception carries diagnostic
+            # data. iter-6 demo's Architect timeout was a bare message;
+            # mirrors iter-5 Phase 4 for the non-zero-exit path.
+            # Drain failure is non-fatal — degrade gracefully to an
+            # empty buffer rather than masking the timeout.
+            buffered_out = ""
+            try:
+                drained_out, _drained_err = await proc.communicate()
+                buffered_out = drained_out.decode(errors="replace")[:2000]
+            except Exception as drain_err:
+                # Best-effort drain — failure degrades diagnostics but
+                # must not mask the timeout itself.
+                log.warning("llm.invoke.timeout.drain_failed", error=str(drain_err))
+            log.error(
+                "llm.invoke.timeout",
+                timeout_s=timeout_s,
+                buffered_stdout=buffered_out,
+            )
+            raise LLMTimeoutError(
+                f"claude -p timed out after {timeout_s}s; stdout={buffered_out!r}"
+            ) from e
 
         duration_ms = int((time.perf_counter() - start) * 1000)
 
