@@ -192,7 +192,7 @@ class MarketResearcherAgent(BaseAgent):
             json_schema=MARKET_SCAN_SCHEMA,
             env=dict(self.mcp_env) if self.mcp_env else None,
         )
-        return self.build_outputs(response, msg)
+        return self._stamp_metrics(self.build_outputs(response, msg), response)
 
     def _fail(self, incoming: AgentMessage, reason: str) -> AgentMessage:
         assert isinstance(incoming.payload, TaskAssignmentPayload)

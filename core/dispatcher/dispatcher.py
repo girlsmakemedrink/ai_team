@@ -9,12 +9,20 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 
 from core.dispatcher.hold_queue import HoldQueue
-from core.messaging.schemas import MessageType, TaskAssignmentPayload, TaskReportPayload, TaskStatus
+from core.messaging.schemas import (
+    AgentId,
+    AgentMessage,
+    MessageType,
+    Priority,
+    TaskAssignmentPayload,
+    TaskReportPayload,
+    TaskStatus,
+)
 from core.observability.logging import bind_correlation_id, clear_correlation_id
 from core.observability.metrics import (
     agent_errors_total,
@@ -27,7 +35,6 @@ if TYPE_CHECKING:
     from core.audit.writer import AuditLogWriter
     from core.messaging.bus import MessageBus
     from core.messaging.feed import FeedPublisher
-    from core.messaging.schemas import AgentId, AgentMessage
     from core.persistence.task_state import TaskStateReducer
 
 _log = structlog.get_logger(__name__)
@@ -124,12 +131,17 @@ class AgentDispatcher:
             ).time():
                 try:
                     outputs = await agent.handle(msg)
-                except Exception:
+                except Exception as exc:
                     _log.exception(
                         "dispatcher.agent.handle.failed",
                         agent=agent.role.value,
                     )
                     agent_errors_total.labels(agent=agent.role.value, error_type="handle").inc()
+                    # iter-5: synthesise a terminal TASK_REPORT(failed) so
+                    # the HoldQueue + rollup + team_feed see the crash.
+                    # Without this, iter-4's silent Backend exit-1 leaves
+                    # downstream agents held forever.
+                    outputs = [_synthesise_failed_report(role=agent.role, incoming=msg, exc=exc)]
 
             for out in outputs:
                 signed = self._signer.with_signature(out)
@@ -233,3 +245,48 @@ def _parse_depends_on(msg: AgentMessage) -> set[UUID]:
         except ValueError:
             continue
     return out
+
+
+def _synthesise_failed_report(
+    *, role: AgentId, incoming: AgentMessage, exc: BaseException
+) -> AgentMessage:
+    """Build a terminal TASK_REPORT(failed) for an agent that crashed.
+
+    Iter-4 demo's Backend hit `claude -p exited 1` with empty stderr;
+    the dispatcher's except block logged the traceback but emitted
+    nothing, so the HoldQueue never saw a terminal status for Backend
+    and QA stayed held until the 20-min wall-clock. iter-5 wires this
+    helper into that except path: the synthetic report runs through
+    the same outbound pipeline as a real one (audit + feed +
+    task-state + HoldQueue.mark_failed + bus), so the chain rolls
+    up correctly on crash.
+
+    `recipient` is USER when the incoming was a root-task user → TL
+    assignment (so the rollup still surfaces to the owner); otherwise
+    it routes back to TEAM_LEAD, matching how real agents report
+    completion / failure.
+    """
+    payload_in = incoming.payload
+    task_id = payload_in.task_id if isinstance(payload_in, TaskAssignmentPayload) else uuid4()
+    parent_raw = incoming.metadata.get("parent_task_id") if incoming.metadata else None
+    type_name = type(exc).__name__
+    first_line = str(exc).splitlines()[0] if str(exc) else ""
+    summary = f"{type_name}: {first_line}"[:500]
+    recipient = AgentId.USER if incoming.sender == AgentId.USER else AgentId.TEAM_LEAD
+    metadata: dict[str, object] = {}
+    if isinstance(parent_raw, str):
+        metadata["parent_task_id"] = parent_raw
+    return AgentMessage(
+        correlation_id=incoming.correlation_id,
+        sender=role,
+        recipient=recipient,
+        message_type=MessageType.TASK_REPORT,
+        priority=Priority.P1,  # failures are high-priority for owner visibility
+        payload=TaskReportPayload(
+            task_id=task_id,
+            status=TaskStatus.FAILED,
+            progress_pct=0,
+            summary=summary,
+        ),
+        metadata=metadata,
+    )

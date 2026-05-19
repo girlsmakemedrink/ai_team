@@ -167,7 +167,7 @@ class DesignerAgent(BaseAgent):
             json_schema=DESIGN_NOTE_SCHEMA,
             env=dict(self.mcp_env) if self.mcp_env else None,
         )
-        return self.build_outputs(response, msg)
+        return self._stamp_metrics(self.build_outputs(response, msg), response)
 
     def _fail_report(self, incoming: AgentMessage, reason: str) -> AgentMessage:
         assert isinstance(incoming.payload, TaskAssignmentPayload)

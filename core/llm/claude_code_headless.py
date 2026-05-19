@@ -114,6 +114,13 @@ class ClaudeCodeHeadlessClient:
             system_prompt,
             "--max-budget-usd",
             f"{effective_budget:.4f}",
+            # iter-5: acceptEdits auto-accepts file edits / tool uses inside
+            # the agent's session so it doesn't stall on the interactive
+            # write-approval prompt that blocked Frontend in iter-4's demo.
+            # Defense-in-depth: dangerous shell commands still gate; per-MCP
+            # path scope is enforced by ai-team-repo's AI_TEAM_PATH_PREFIXES.
+            "--permission-mode",
+            "acceptEdits",
         ]
         if allowed_tools:
             cmd += ["--allowed-tools", ",".join(allowed_tools)]
@@ -174,8 +181,19 @@ class ClaudeCodeHeadlessClient:
 
         if proc.returncode != 0:
             err = stderr.decode(errors="replace")[:1000]
-            log.error("llm.invoke.failed", returncode=proc.returncode, stderr=err)
-            raise LLMInvocationError(f"claude -p exited {proc.returncode}: {err}")
+            # iter-5: also capture stdout. iter-4 demo's Backend hit
+            # `exited 1` with EMPTY stderr — the actual error was on
+            # stdout. See iter_4_demo_report.md Failure 1.
+            out = stdout.decode(errors="replace")[:2000]
+            log.error(
+                "llm.invoke.failed",
+                returncode=proc.returncode,
+                stderr=err,
+                stdout=out,
+            )
+            raise LLMInvocationError(
+                f"claude -p exited {proc.returncode}: stderr={err!r} stdout={out!r}"
+            )
 
         response = self._parse_response(stdout, model_id=model_id, duration_ms=duration_ms)
         log.info(
