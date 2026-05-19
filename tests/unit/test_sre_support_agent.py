@@ -149,9 +149,7 @@ async def test_handle_writes_alert_to_monitoring_dir_when_kind_is_alert(
 
 
 @pytest.mark.asyncio
-async def test_handle_rejects_invalid_slug(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_handle_rejects_invalid_slug(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agents.sre_support.agent._RUNBOOK_DIR", tmp_path / "docs" / "runbooks")
     monkeypatch.setattr("agents.sre_support.agent._REPO_ROOT", tmp_path)
 
