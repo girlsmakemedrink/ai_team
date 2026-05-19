@@ -95,7 +95,7 @@ ignore = [
 python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
-exclude = ["^alembic/versions/", "^build/", "^dist/"]
+exclude = ["^alembic/versions/", "^build/", "^dist/", "^examples/"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
