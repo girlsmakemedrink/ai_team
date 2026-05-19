@@ -177,29 +177,10 @@ class AgentDispatcher:
                             # time. Just push to the bus.
                             await self._bus.publish(r)
                     elif signed.payload.status == TaskStatus.FAILED:
-                        dropped = await self._hold_queue.mark_failed(
-                            signed.correlation_id, signed.payload.task_id
+                        await self._cascade_drops(
+                            correlation_id=signed.correlation_id,
+                            failed_task_id=signed.payload.task_id,
                         )
-                        for d in dropped:
-                            _log.warning(
-                                "dispatcher.dependent_dropped_after_failure",
-                                correlation_id=str(d.correlation_id),
-                                message_id=str(d.message_id),
-                                failed_task_id=str(signed.payload.task_id),
-                            )
-                        # iter-6: terminalise the dropped dependents'
-                        # child Task rows so the rollup accounts for them.
-                        # Without this, dropped dependents stayed
-                        # `in_progress` indefinitely (iter-5 demo
-                        # Failure 3) and the root rollup was incomplete.
-                        if self._task_state is not None and dropped:
-                            dropped_task_ids = [
-                                d.payload.task_id
-                                for d in dropped
-                                if isinstance(d.payload, TaskAssignmentPayload)
-                            ]
-                            if dropped_task_ids:
-                                await self._task_state.on_drop(dropped_task_ids)
 
             await self._bus.ack(agent.role, entry_id)
         finally:
@@ -243,6 +224,45 @@ class AgentDispatcher:
             await self._task_state.on_report(
                 task_id=msg.payload.task_id, status=msg.payload.status.value
             )
+
+    async def _cascade_drops(self, *, correlation_id: UUID, failed_task_id: UUID) -> None:
+        """Walk the HoldQueue + reducer drop pipeline transitively.
+
+        iter-7: drive the cascade with a queue. Every task_id returned
+        by `HoldQueue.mark_failed` becomes a new failure trigger so
+        transitive dependents (e.g. fe → qa in arch→design→fe→qa)
+        get dropped in the same pass.
+
+        Cycle-safe: `mark_failed` only drains `_held` entries that match
+        the trigger, and `on_drop` is idempotent on already-terminal
+        rows. The reducer's `on_drop` flips dropped child Task rows to
+        `failed` and rolls parents up via `derive_parent_status`.
+
+        iter-6 baseline (just one level deep) closed iter-5 demo
+        Failure 3; iter-7 extends to N levels (closes iter-6 demo
+        Failure 2 — fe + qa stuck `in_progress` after design dropped).
+        """
+        to_drop_triggers: list[UUID] = [failed_task_id]
+        while to_drop_triggers:
+            trigger_id = to_drop_triggers.pop(0)
+            dropped = await self._hold_queue.mark_failed(correlation_id, trigger_id)
+            if not dropped:
+                continue
+            for d in dropped:
+                _log.warning(
+                    "dispatcher.dependent_dropped_after_failure",
+                    correlation_id=str(d.correlation_id),
+                    message_id=str(d.message_id),
+                    failed_task_id=str(trigger_id),
+                )
+            dropped_task_ids = [
+                d.payload.task_id for d in dropped if isinstance(d.payload, TaskAssignmentPayload)
+            ]
+            if self._task_state is not None and dropped_task_ids:
+                await self._task_state.on_drop(dropped_task_ids)
+            # Each dropped task_id is now a failure trigger for any
+            # further-downstream dependents.
+            to_drop_triggers.extend(dropped_task_ids)
 
 
 def _parse_depends_on(msg: AgentMessage) -> set[UUID]:
