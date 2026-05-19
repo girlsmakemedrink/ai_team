@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import structlog
 
 from core.dispatcher.hold_queue import HoldQueue
+from core.dispatcher.mcp_race_router import maybe_route_mcp_race_to_blocked
 from core.llm.base import LLMBudgetExhaustedError, MCPUnhealthyError
 from core.messaging.schemas import (
     AgentId,
@@ -144,7 +145,14 @@ class AgentDispatcher:
                     # downstream agents held forever.
                     outputs = [_synthesise_failed_report(role=agent.role, incoming=msg, exc=exc)]
 
-            for out in outputs:
+            for raw_out in outputs:
+                # iter-10: route LLM-emitted MCP-race failures to
+                # BLOCKED before HMAC-sign so dependents stay held
+                # in HoldQueue instead of cascade-dropping. Pure
+                # pass-through for non-matching messages (no copy
+                # made). See iter_9_demo_report.md Failure 1 +
+                # iter_10.md success criterion #3.
+                out = maybe_route_mcp_race_to_blocked(raw_out)
                 signed = self._signer.with_signature(out)
                 # Audit + feed-publish at intent time: the message exists,
                 # even if held off the bus. Owner observability is
