@@ -261,3 +261,12 @@ def test_mcp_env_scopes_to_adr_dirs() -> None:
     """Architect's MCP server spawns with path scope limited to docs/adr/
     and docs/architecture.md per ADR-004."""
     assert ArchitectAgent.mcp_env["AI_TEAM_PATH_PREFIXES"] == "docs/adr,docs/architecture.md"
+
+
+def test_llm_timeout_s_is_600_for_architect() -> None:
+    """Architect's per-call timeout must be 600 s (matches Backend /
+    Frontend / DevOps) so the v2 ADR + system-design draft has
+    headroom. iter-6 demo timed out at 300 s. See
+    docs/iterations/iter_6_demo_report.md Failure 1 and
+    docs/iterations/iter_7.md decision #1."""
+    assert ArchitectAgent.llm_timeout_s == 600

@@ -152,6 +152,10 @@ def _render_adr_markdown(
 class ArchitectAgent(BaseAgent):
     role: ClassVar[AgentId] = AgentId.ARCHITECT
     model_tier: ClassVar = "opus"
+    # iter-7: ADR + system-design drafts reliably take 2-5 min on Opus;
+    # the 300 s BaseAgent default timed out in the iter-6 demo. Match
+    # Backend / Frontend / DevOps's 600 s.
+    llm_timeout_s: ClassVar[int] = 600
     # Per ADR-004: writes only via MCP wrapper, no raw Write/Edit/Bash.
     # Read/Glob/Grep stay so Architect can survey the codebase before deciding.
     # WebFetch stays for citing external docs.
