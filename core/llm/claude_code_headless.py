@@ -181,8 +181,19 @@ class ClaudeCodeHeadlessClient:
 
         if proc.returncode != 0:
             err = stderr.decode(errors="replace")[:1000]
-            log.error("llm.invoke.failed", returncode=proc.returncode, stderr=err)
-            raise LLMInvocationError(f"claude -p exited {proc.returncode}: {err}")
+            # iter-5: also capture stdout. iter-4 demo's Backend hit
+            # `exited 1` with EMPTY stderr — the actual error was on
+            # stdout. See iter_4_demo_report.md Failure 1.
+            out = stdout.decode(errors="replace")[:2000]
+            log.error(
+                "llm.invoke.failed",
+                returncode=proc.returncode,
+                stderr=err,
+                stdout=out,
+            )
+            raise LLMInvocationError(
+                f"claude -p exited {proc.returncode}: stderr={err!r} stdout={out!r}"
+            )
 
         response = self._parse_response(stdout, model_id=model_id, duration_ms=duration_ms)
         log.info(

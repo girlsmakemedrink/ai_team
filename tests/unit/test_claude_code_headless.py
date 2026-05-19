@@ -320,6 +320,35 @@ async def test_invoke_passes_permission_mode_accept_edits() -> None:
     argv = captured_argvs[0]
     assert "--permission-mode" in argv, f"argv missing --permission-mode: {argv}"
     idx = argv.index("--permission-mode")
-    assert argv[idx + 1] == "acceptEdits", (
-        f"expected acceptEdits, got {argv[idx + 1]!r}"
-    )
+    assert argv[idx + 1] == "acceptEdits", f"expected acceptEdits, got {argv[idx + 1]!r}"
+
+
+# === iter-5 Phase 4: log + raise stdout on non-zero exit ===
+
+
+@pytest.mark.asyncio
+async def test_invoke_includes_stdout_in_exception_when_stderr_empty() -> None:
+    """When `claude -p` exits non-zero with empty stderr but a non-empty
+    stdout, the raised LLMInvocationError must carry stdout. iter-4
+    demo's Backend hit this exact shape: `exited 1`, empty stderr, the
+    actual error must have been on stdout. See iter_4_demo_report.md
+    Failure 1 + iter_5.md Phase 4."""
+    client = ClaudeCodeHeadlessClient()
+
+    class _FailingProc:
+        returncode = 1
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"actual error message on stdout from claude -p", b""
+
+    async def _fake_create(*_cmd: str, **_kwargs: Any) -> _FailingProc:
+        return _FailingProc()
+
+    with (
+        patch(
+            "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=_fake_create),
+        ),
+        pytest.raises(LLMInvocationError, match="actual error message on stdout"),
+    ):
+        await client.invoke(system_prompt="sp", user_message="u", model="haiku")
