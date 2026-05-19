@@ -424,3 +424,17 @@ async def test_invoke_does_not_misclassify_other_non_zero_as_budget() -> None:
     # Important: NOT the budget subclass — `isinstance` will fail if we
     # accidentally widen the detector.
     assert not isinstance(exc_info.value, LLMBudgetExhaustedError)
+
+
+def test_is_budget_exhausted_stdout_robust_against_truncated_json() -> None:
+    """The 2-KB stdout cap can leave the JSON object incomplete; in that
+    case `_is_budget_exhausted_stdout` must return False (caller falls
+    back to LLMInvocationError) rather than raising on malformed JSON.
+    The marker substring is present but the JSON is unparseable."""
+    from core.llm.claude_code_headless import _is_budget_exhausted_stdout
+
+    truncated = '{"type":"result","subtype":"error_max_budget_usd","usage":{"input'
+    assert _is_budget_exhausted_stdout(truncated) is False
+    # And without the marker substring it short-circuits to False without
+    # attempting to parse.
+    assert _is_budget_exhausted_stdout("plain stdout, no marker here") is False

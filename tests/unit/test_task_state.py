@@ -62,6 +62,22 @@ def test_derive_parent_status_failed_dominates_pending() -> None:
 # === iter-6 Phase 3: TaskStateReducer.on_drop signature ===
 
 
+async def test_on_drop_returns_immediately_on_empty_list() -> None:
+    """The dispatcher passes an empty list when HoldQueue dropped no
+    messages (i.e. predecessor failed but had no dependents). on_drop
+    must early-return without opening a session — a fake session
+    factory whose call would raise proves we never hit the DB path."""
+    from unittest.mock import Mock
+
+    from core.persistence.task_state import TaskStateReducer
+
+    def _raise_on_call() -> None:
+        raise AssertionError("on_drop must early-return on empty list")
+
+    reducer = TaskStateReducer(session_factory=Mock(side_effect=_raise_on_call))
+    await reducer.on_drop([])  # would raise if session_factory got called
+
+
 def test_on_drop_is_async_method_on_reducer() -> None:
     """Sanity: TaskStateReducer.on_drop exists as an async method that
     accepts a list[UUID] of dropped child task ids. Full DB-side
