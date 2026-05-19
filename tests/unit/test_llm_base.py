@@ -1,4 +1,5 @@
 from core.llm.base import (
+    DEFAULT_MAX_BUDGET_USD_PER_TIER,
     PRICE_TABLE_CENTS_PER_MTOK,
     TokensUsage,
     estimate_cost_cents,
@@ -26,3 +27,14 @@ def test_estimate_cost_unknown_model_zero() -> None:
 def test_tokens_total() -> None:
     t = TokensUsage(input=10, output=5, cached_input=3, model="x")
     assert t.total == 15
+
+
+def test_default_budget_per_tier_matches_iter6_values() -> None:
+    # Pin iter-6 budget caps so a future tightening surfaces in review with
+    # reasoning. See docs/iterations/iter_5_demo_report.md Failure 1 and
+    # iter_6.md decision #1.
+    assert DEFAULT_MAX_BUDGET_USD_PER_TIER == {
+        "haiku": 0.30,
+        "sonnet": 1.50,
+        "opus": 4.00,
+    }

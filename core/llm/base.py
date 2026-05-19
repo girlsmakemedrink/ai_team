@@ -23,6 +23,14 @@ class LLMInvocationError(LLMError):
     malformed output."""
 
 
+class LLMBudgetExhaustedError(LLMError):
+    """Raised when `claude -p` returns subtype=error_max_budget_usd on
+    its stdout response JSON. The dispatcher catches this distinctly
+    and synthesises TASK_REPORT(status=BLOCKED, blocked_on='budget') so
+    dependents aren't cascade-dropped — owner can manually retry with
+    elevated budget. See iter_6.md Phase 2."""
+
+
 class TokensUsage(BaseModel):
     input: int = 0
     output: int = 0
@@ -106,9 +114,9 @@ PRICE_TABLE_CENTS_PER_MTOK: dict[str, tuple[int, int]] = {
 # Tight defaults protect runaway loops; agents that need more should
 # override per-call.
 DEFAULT_MAX_BUDGET_USD_PER_TIER: dict[ModelTier, float] = {
-    "haiku": 0.10,
-    "sonnet": 0.50,
-    "opus": 2.00,
+    "haiku": 0.30,
+    "sonnet": 1.50,
+    "opus": 4.00,
 }
 
 

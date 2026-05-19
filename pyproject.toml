@@ -57,7 +57,11 @@ packages = ["apps", "agents", "core", "tools"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["alembic/versions"]
+# examples/ holds TARGET_REPO sandbox projects (ADR-009) — each is a
+# standalone Python project (own pyproject) authored by the agent team,
+# not orchestrator source code. We don't lint them at the orchestrator
+# level; their own CI / lint setup is their concern.
+extend-exclude = ["alembic/versions", "examples"]
 
 [tool.ruff.lint]
 select = [

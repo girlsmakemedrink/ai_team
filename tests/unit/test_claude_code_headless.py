@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.llm.base import LLMInvocationError
+from core.llm.base import LLMBudgetExhaustedError, LLMInvocationError
 from core.llm.claude_code_headless import ClaudeCodeHeadlessClient
 
 
@@ -352,3 +352,89 @@ async def test_invoke_includes_stdout_in_exception_when_stderr_empty() -> None:
         pytest.raises(LLMInvocationError, match="actual error message on stdout"),
     ):
         await client.invoke(system_prompt="sp", user_message="u", model="haiku")
+
+
+# === iter-6 Phase 2: distinct LLMBudgetExhaustedError on subtype=error_max_budget_usd ===
+
+
+@pytest.mark.asyncio
+async def test_invoke_raises_budget_exhausted_on_error_max_budget_subtype() -> None:
+    """When claude -p's stdout JSON carries subtype=error_max_budget_usd
+    (the iter-5 demo's Backend signature), the adapter raises the
+    distinct LLMBudgetExhaustedError so the dispatcher can route it to
+    BLOCKED instead of failed. See iter_6.md Phase 2."""
+    client = ClaudeCodeHeadlessClient()
+
+    stdout_payload = json.dumps(
+        {
+            "type": "result",
+            "subtype": "error_max_budget_usd",
+            "is_error": True,
+            "session_id": "s",
+            "total_cost_usd": 0.5,
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+    ).encode()
+
+    class _FailingProc:
+        returncode = 1
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return stdout_payload, b""
+
+    async def _fake_create(*_cmd: str, **_kwargs: Any) -> _FailingProc:
+        return _FailingProc()
+
+    with (
+        patch(
+            "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=_fake_create),
+        ),
+        pytest.raises(LLMBudgetExhaustedError),
+    ):
+        await client.invoke(system_prompt="sp", user_message="u", model="sonnet")
+
+
+@pytest.mark.asyncio
+async def test_invoke_does_not_misclassify_other_non_zero_as_budget() -> None:
+    """A non-zero exit with stdout that does NOT carry
+    subtype=error_max_budget_usd must remain a plain LLMInvocationError,
+    not LLMBudgetExhaustedError. Guards against false positives from
+    substring matching."""
+    client = ClaudeCodeHeadlessClient()
+
+    class _FailingProc:
+        returncode = 1
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b'{"type":"result","subtype":"rate_limited","is_error":true}', b""
+
+    async def _fake_create(*_cmd: str, **_kwargs: Any) -> _FailingProc:
+        return _FailingProc()
+
+    with (
+        patch(
+            "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=_fake_create),
+        ),
+        pytest.raises(LLMInvocationError) as exc_info,
+    ):
+        await client.invoke(system_prompt="sp", user_message="u", model="haiku")
+
+    # Important: NOT the budget subclass — `isinstance` will fail if we
+    # accidentally widen the detector.
+    assert not isinstance(exc_info.value, LLMBudgetExhaustedError)
+
+
+def test_is_budget_exhausted_stdout_robust_against_truncated_json() -> None:
+    """The 2-KB stdout cap can leave the JSON object incomplete; in that
+    case `_is_budget_exhausted_stdout` must return False (caller falls
+    back to LLMInvocationError) rather than raising on malformed JSON.
+    The marker substring is present but the JSON is unparseable."""
+    from core.llm.claude_code_headless import _is_budget_exhausted_stdout
+
+    truncated = '{"type":"result","subtype":"error_max_budget_usd","usage":{"input'
+    assert _is_budget_exhausted_stdout(truncated) is False
+    # And without the marker substring it short-circuits to False without
+    # attempting to parse.
+    assert _is_budget_exhausted_stdout("plain stdout, no marker here") is False
