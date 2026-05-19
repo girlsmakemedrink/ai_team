@@ -791,6 +791,199 @@ def _tl_be_then_qa_response() -> LLMResponse:
     )
 
 
+def _tl_arch_then_be_response() -> LLMResponse:
+    """TL emits arch (no deps) + be (depends_on=[arch]). Iter-6 Phase 3
+    test uses this to drive arch → FAILED so be gets dropped by
+    HoldQueue and on_drop must flip be's Task row to FAILED."""
+    return LLMResponse(
+        text="",
+        structured={
+            "summary": "Arch then Backend.",
+            "subtasks": [
+                {
+                    "id": "arch",
+                    "recipient": "architect",
+                    "title": "Design",
+                    "description": "Tiny ADR.",
+                    "priority": "P2",
+                    "depends_on": [],
+                },
+                {
+                    "id": "be",
+                    "recipient": "backend_developer",
+                    "title": "Build",
+                    "description": "Impl per ADR.",
+                    "priority": "P2",
+                    "depends_on": ["arch"],
+                },
+            ],
+        },
+        tools_used=[],
+        session_id="tl-iter6-drop",
+        tokens=TokensUsage(input=10, output=20, model="claude-opus-4-7"),
+        cost_estimate_cents=0,
+        duration_ms=100,
+        raw={},
+    )
+
+
+class _RaisingArchitect(BaseAgent):
+    """Stub Architect whose handle() raises RuntimeError so the dispatcher
+    synthesises TASK_REPORT(failed) → HoldQueue.mark_failed → drops the
+    queued Backend assignment. Iter-6 dispatcher must walk those dropped
+    messages through TaskStateReducer.on_drop so the be child Task row
+    flips from in_progress to failed."""
+
+    role: ClassVar[AgentId] = AgentId.ARCHITECT
+    system_prompt_path: ClassVar[Path] = Path("/dev/null")
+
+    def __init__(self) -> None:
+        self._cached_prompt: str | None = None
+
+    def system_prompt(self) -> str:
+        return "# Role: Architect\nStub agent for tests.\n"
+
+    async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
+        del msg
+        raise RuntimeError("simulated architect crash for iter-6 on_drop test")
+
+    def build_outputs(
+        self,
+        response: LLMResponse,
+        incoming: AgentMessage,
+    ) -> list[AgentMessage]:
+        del response, incoming
+        return []
+
+
+async def test_dropped_dependent_child_task_flips_to_failed(
+    redis_url: str,
+    session_factory: async_sessionmaker[AsyncSession],
+    db_session: AsyncSession,
+) -> None:
+    _ = db_session
+    """Predecessor fails → HoldQueue drops dependent → dispatcher walks
+    dropped messages through TaskStateReducer.on_drop → dependent child
+    Task row flips from in_progress to failed → root Task rolls up.
+
+    Pre-iter-6 bug: dropped dependents left child Task rows stuck
+    in_progress indefinitely even though they would never run. See
+    iter_5_demo_report.md Failure 3 + iter_6.md Phase 3."""
+    bus = MessageBus.from_url(redis_url)
+    feed = FeedPublisher.from_url(redis_url, db_session_factory=session_factory)
+    signer = HMACSigner(_SECRET)
+    audit = AuditLogWriter(session_factory, _SECRET)
+
+    llm = _OnlyTLResponseLLM(_tl_arch_then_be_response())
+    be_received: list[AgentMessage] = []
+
+    agents = {
+        AgentId.TEAM_LEAD: TeamLeadAgent(llm=llm),
+        AgentId.ARCHITECT: _RaisingArchitect(),
+        # Backend stub records if the bus ever delivers — should NOT happen
+        # because be is dropped by HoldQueue when arch fails.
+        AgentId.BACKEND_DEVELOPER: _StubBackend(observer=be_received),
+    }
+    task_state = TaskStateReducer(session_factory)
+    dispatcher = AgentDispatcher(
+        bus=bus,
+        feed=feed,
+        audit=audit,
+        signer=signer,
+        agents=agents,
+        iteration=6,
+        task_state=task_state,
+    )
+
+    task = asyncio.create_task(dispatcher.run())
+
+    correlation_id = uuid4()
+    root_task_id = uuid4()
+    user_msg = signer.with_signature(
+        AgentMessage(
+            correlation_id=correlation_id,
+            sender=AgentId.USER,
+            recipient=AgentId.TEAM_LEAD,
+            message_type=MessageType.TASK_ASSIGNMENT,
+            priority=Priority.P2,
+            payload=TaskAssignmentPayload(
+                task_id=root_task_id,
+                title="iter-6 on_drop path",
+                description="Architect crashes; Backend dependent gets dropped.",
+            ),
+        )
+    )
+
+    async with session_factory() as session:
+        session.add(
+            Task(
+                id=root_task_id,
+                correlation_id=correlation_id,
+                title="iter-6 on_drop path",
+                description="Architect crashes; Backend dependent gets dropped.",
+                status="in_progress",
+                assigned_agent=AgentId.TEAM_LEAD.value,
+                priority=Priority.P2.value,
+                iteration=6,
+            )
+        )
+        await session.commit()
+
+    try:
+        await audit.write_message(user_msg, iteration=6)
+        await bus.publish(user_msg)
+
+        # Wait for root Task rollup to terminate (any-failed → failed).
+        deadline = asyncio.get_event_loop().time() + 15
+        root_status = "in_progress"
+        while asyncio.get_event_loop().time() < deadline:
+            async with session_factory() as session:
+                root = (
+                    await session.execute(select(Task).where(Task.id == root_task_id))
+                ).scalar_one()
+            root_status = root.status
+            if root_status == "failed":
+                break
+            await asyncio.sleep(0.2)
+        assert root_status == "failed", f"root rollup expected 'failed', got {root_status!r}"
+
+        # Backend was NEVER delivered (HoldQueue dropped it on arch's failure).
+        assert be_received == [], (
+            f"Backend must not run when its predecessor failed; "
+            f"received {len(be_received)} messages"
+        )
+
+        # Child Task rows: arch=failed (real), be=failed (via on_drop).
+        # Without iter-6's on_drop, be would still be in_progress here.
+        async with session_factory() as session:
+            children = (
+                (await session.execute(select(Task).where(Task.parent_task_id == root_task_id)))
+                .scalars()
+                .all()
+            )
+        by_role = {c.assigned_agent: c for c in children}
+        assert AgentId.ARCHITECT.value in by_role, f"no architect child row: {list(by_role.keys())}"
+        assert AgentId.BACKEND_DEVELOPER.value in by_role, (
+            f"no backend_developer child row: {list(by_role.keys())}"
+        )
+        assert by_role[AgentId.ARCHITECT.value].status == "failed", (
+            f"arch child must be 'failed' (real synth), "
+            f"got {by_role[AgentId.ARCHITECT.value].status!r}"
+        )
+        assert by_role[AgentId.BACKEND_DEVELOPER.value].status == "failed", (
+            f"be child must be 'failed' (via on_drop); "
+            f"got {by_role[AgentId.BACKEND_DEVELOPER.value].status!r}"
+        )
+    finally:
+        dispatcher.shutdown()
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except (TimeoutError, asyncio.CancelledError):
+            task.cancel()
+        await bus.close()
+        await feed.close()
+
+
 async def test_budget_exhausted_emits_blocked_does_not_cascade_drop(
     redis_url: str,
     session_factory: async_sessionmaker[AsyncSession],

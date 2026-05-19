@@ -187,6 +187,19 @@ class AgentDispatcher:
                                 message_id=str(d.message_id),
                                 failed_task_id=str(signed.payload.task_id),
                             )
+                        # iter-6: terminalise the dropped dependents'
+                        # child Task rows so the rollup accounts for them.
+                        # Without this, dropped dependents stayed
+                        # `in_progress` indefinitely (iter-5 demo
+                        # Failure 3) and the root rollup was incomplete.
+                        if self._task_state is not None and dropped:
+                            dropped_task_ids = [
+                                d.payload.task_id
+                                for d in dropped
+                                if isinstance(d.payload, TaskAssignmentPayload)
+                            ]
+                            if dropped_task_ids:
+                                await self._task_state.on_drop(dropped_task_ids)
 
             await self._bus.ack(agent.role, entry_id)
         finally:
