@@ -31,6 +31,16 @@ class LLMBudgetExhaustedError(LLMError):
     elevated budget. See iter_6.md Phase 2."""
 
 
+class MCPUnhealthyError(LLMError):
+    """Raised by `BaseAgent.handle()`'s pre-flight check when one of
+    the agent's declared MCP servers fails to import or env-validate.
+    The dispatcher catches this distinctly and synthesises
+    TASK_REPORT(status=BLOCKED, blocked_on='mcp_unhealthy') — same
+    pattern as LLMBudgetExhaustedError, dependents stay held in the
+    HoldQueue for owner manual retry rather than cascade-dropping.
+    See iter_8_demo_report.md Failure 1 + iter_9.md success criterion #4."""
+
+
 class TokensUsage(BaseModel):
     input: int = 0
     output: int = 0
