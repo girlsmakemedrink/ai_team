@@ -3,7 +3,7 @@
         test test-unit test-integration test-smoke test-real-llm \
         lint typecheck format format-check fix sec \
         migrate alembic-rev \
-        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 demo-iter-5 demo-iter-6 demo-iter-7 demo-iter-8 \
+        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 demo-iter-5 demo-iter-6 demo-iter-7 demo-iter-8 demo-iter-9 \
         clean
 
 help: ## Show available targets
@@ -96,9 +96,12 @@ alembic-rev: ## New alembic revision (usage: make alembic-rev MSG="description")
 smoke-llm: ## Validate `claude -p` substrate (ADR-008)
 	uv run python scripts/smoke_claude_p.py
 
-demo: demo-iter-8 ## Alias for the current iteration's demo
+demo: demo-iter-9 ## Alias for the current iteration's demo
 
-demo-iter-8: ## Run iter-8 e2e (Designer 600s + substring BLOCKED detector + sonnet $2.50)
+demo-iter-9: ## Run iter-9 e2e (pre-flight MCP health-gate → BLOCKED on unhealthy)
+	bash scripts/demo_iter_9.sh
+
+demo-iter-8: ## Run iter-8 e2e — regression baseline
 	bash scripts/demo_iter_8.sh
 
 demo-iter-7: ## Run iter-7 e2e — regression baseline
