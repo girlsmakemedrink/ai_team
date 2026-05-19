@@ -56,7 +56,13 @@ class BaseAgent(ABC):
     disallowed_tools: ClassVar[tuple[str, ...]] = ()
     system_prompt_path: ClassVar[Path]
     max_turns: ClassVar[int] = 8
-    llm_timeout_s: ClassVar[int] = 120
+    # 300 s default — the iter-3 demo run found PM Sonnet's user-story
+    # decomposition takes ~150 s of model output for a realistic spec,
+    # so the historical 120 s default cut PM off mid-turn. Agents that
+    # genuinely need longer (Backend, Frontend, DevOps at 600 s)
+    # override this; agents like TL whose calls finish quickly are
+    # unaffected — the timeout is a ceiling, not a floor.
+    llm_timeout_s: ClassVar[int] = 300
     max_concurrent: ClassVar[int] = 1  # serial per agent by default
     # Per-role env merged into claude -p's subprocess env (via LLMClient.invoke
     # env=...). Typically the role-specific AI_TEAM_PATH_PREFIXES / DENY /
