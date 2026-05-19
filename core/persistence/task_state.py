@@ -158,11 +158,7 @@ class TaskStateReducer:
             # the root to `failed` (any-failed dominates).
             for parent_id in parent_ids:
                 siblings = (
-                    (
-                        await session.execute(
-                            select(Task).where(Task.parent_task_id == parent_id)
-                        )
-                    )
+                    (await session.execute(select(Task).where(Task.parent_task_id == parent_id)))
                     .scalars()
                     .all()
                 )
