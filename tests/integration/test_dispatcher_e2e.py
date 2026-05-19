@@ -312,6 +312,14 @@ class _StubQA(_StaticDoneAgentBase):
     role: ClassVar[AgentId] = AgentId.QA_ENGINEER
 
 
+class _StubDesigner(_StaticDoneAgentBase):
+    role: ClassVar[AgentId] = AgentId.DESIGNER
+
+
+class _StubFrontend(_StaticDoneAgentBase):
+    role: ClassVar[AgentId] = AgentId.FRONTEND_DEVELOPER
+
+
 def _tl_three_stage_response() -> LLMResponse:
     """TL emits a 3-stage DAG: arch → be → qa."""
     return LLMResponse(
@@ -1120,6 +1128,188 @@ async def test_budget_exhausted_emits_blocked_does_not_cascade_drop(
         assert qa_children[0].status == "in_progress", (
             f"QA child must stay in_progress under BLOCKED, got {qa_children[0].status!r}"
         )
+    finally:
+        dispatcher.shutdown()
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except (TimeoutError, asyncio.CancelledError):
+            task.cancel()
+        await bus.close()
+        await feed.close()
+
+
+# === iter-7 Phase 3: cascade drops through HoldQueue (transitive) ===
+
+
+def _tl_three_level_cascade_response() -> LLMResponse:
+    """TL emits arch (no deps) → design (depends_on=arch) →
+    fe (depends_on=design). When arch fails, iter-7's cascade must
+    drop design AND fe (the transitive dependent)."""
+    return LLMResponse(
+        text="",
+        structured={
+            "summary": "Three-level cascade test.",
+            "subtasks": [
+                {
+                    "id": "arch",
+                    "recipient": "architect",
+                    "title": "Design",
+                    "description": "Tiny ADR.",
+                    "priority": "P2",
+                    "depends_on": [],
+                },
+                {
+                    "id": "design",
+                    "recipient": "designer",
+                    "title": "UX brief",
+                    "description": "Wireframes.",
+                    "priority": "P2",
+                    "depends_on": ["arch"],
+                },
+                {
+                    "id": "fe",
+                    "recipient": "frontend_developer",
+                    "title": "Landing page",
+                    "description": "Implement per design.",
+                    "priority": "P3",
+                    "depends_on": ["design"],
+                },
+            ],
+        },
+        tools_used=[],
+        session_id="tl-iter7-cascade",
+        tokens=TokensUsage(input=10, output=20, model="claude-opus-4-7"),
+        cost_estimate_cents=0,
+        duration_ms=100,
+        raw={},
+    )
+
+
+async def test_transitive_drops_cascade_through_hold_queue(
+    redis_url: str,
+    session_factory: async_sessionmaker[AsyncSession],
+    db_session: AsyncSession,
+) -> None:
+    _ = db_session
+    """Three-level cascade: arch FAILED → design dropped → fe dropped
+    transitively (fe depends_on=[design], design was dropped not failed).
+    All three child Task rows must flip to failed; root rolls up to
+    failed. Pre-iter-7, fe stayed in_progress because the HoldQueue
+    only fired on real TASK_REPORT(failed) rows. See iter_6_demo_
+    report.md Failure 2 + iter_7.md Phase 3."""
+    bus = MessageBus.from_url(redis_url)
+    feed = FeedPublisher.from_url(redis_url, db_session_factory=session_factory)
+    signer = HMACSigner(_SECRET)
+    audit = AuditLogWriter(session_factory, _SECRET)
+
+    llm = _OnlyTLResponseLLM(_tl_three_level_cascade_response())
+    design_received: list[AgentMessage] = []
+    fe_received: list[AgentMessage] = []
+
+    agents = {
+        AgentId.TEAM_LEAD: TeamLeadAgent(llm=llm),
+        AgentId.ARCHITECT: _RaisingArchitect(),
+        AgentId.DESIGNER: _StubDesigner(observer=design_received),
+        AgentId.FRONTEND_DEVELOPER: _StubFrontend(observer=fe_received),
+    }
+    task_state = TaskStateReducer(session_factory)
+    dispatcher = AgentDispatcher(
+        bus=bus,
+        feed=feed,
+        audit=audit,
+        signer=signer,
+        agents=agents,
+        iteration=7,
+        task_state=task_state,
+    )
+
+    task = asyncio.create_task(dispatcher.run())
+
+    correlation_id = uuid4()
+    root_task_id = uuid4()
+    user_msg = signer.with_signature(
+        AgentMessage(
+            correlation_id=correlation_id,
+            sender=AgentId.USER,
+            recipient=AgentId.TEAM_LEAD,
+            message_type=MessageType.TASK_ASSIGNMENT,
+            priority=Priority.P2,
+            payload=TaskAssignmentPayload(
+                task_id=root_task_id,
+                title="iter-7 transitive-drop cascade",
+                description="Architect crashes; design + fe must both drop.",
+            ),
+        )
+    )
+
+    async with session_factory() as session:
+        session.add(
+            Task(
+                id=root_task_id,
+                correlation_id=correlation_id,
+                title="iter-7 transitive-drop cascade",
+                description="Architect crashes; design + fe must both drop.",
+                status="in_progress",
+                assigned_agent=AgentId.TEAM_LEAD.value,
+                priority=Priority.P2.value,
+                iteration=7,
+            )
+        )
+        await session.commit()
+
+    try:
+        await audit.write_message(user_msg, iteration=7)
+        await bus.publish(user_msg)
+
+        # Wait for root Task to terminate (any-failed → failed).
+        deadline = asyncio.get_event_loop().time() + 15
+        root_status = "in_progress"
+        while asyncio.get_event_loop().time() < deadline:
+            async with session_factory() as session:
+                root = (
+                    await session.execute(select(Task).where(Task.id == root_task_id))
+                ).scalar_one()
+            root_status = root.status
+            if root_status == "failed":
+                break
+            await asyncio.sleep(0.2)
+        assert root_status == "failed", f"root rollup expected 'failed', got {root_status!r}"
+
+        # Neither downstream stub ever ran (HoldQueue dropped both).
+        assert design_received == [], (
+            f"Designer should be dropped (depends_on=arch); "
+            f"received {len(design_received)} messages"
+        )
+        assert fe_received == [], (
+            f"Frontend should be dropped (transitively, depends_on=design); "
+            f"received {len(fe_received)} messages"
+        )
+
+        # All three child Task rows flipped to failed:
+        # - arch: via the real synth-failed task_report
+        # - design: via on_drop (direct dependent of arch)
+        # - fe: via on_drop (transitive — iter-7 cascade)
+        async with session_factory() as session:
+            children = (
+                (await session.execute(select(Task).where(Task.parent_task_id == root_task_id)))
+                .scalars()
+                .all()
+            )
+        by_role = {c.assigned_agent: c for c in children}
+        for role in (
+            AgentId.ARCHITECT.value,
+            AgentId.DESIGNER.value,
+            AgentId.FRONTEND_DEVELOPER.value,
+        ):
+            assert role in by_role, f"no {role} child row: {list(by_role.keys())}"
+            assert by_role[role].status == "failed", (
+                f"{role} child must be 'failed' (cascade), got {by_role[role].status!r}"
+            )
+
+        # HoldQueue is empty at end (no leaks).
+        held = dispatcher._hold_queue._held
+        for cid, items in held.items():
+            assert items == [], f"held messages remain at end of test: cid={cid} items={items}"
     finally:
         dispatcher.shutdown()
         try:

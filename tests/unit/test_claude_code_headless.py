@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.llm.base import LLMBudgetExhaustedError, LLMInvocationError
+from core.llm.base import LLMBudgetExhaustedError, LLMInvocationError, LLMTimeoutError
 from core.llm.claude_code_headless import ClaudeCodeHeadlessClient
 
 
@@ -424,6 +424,110 @@ async def test_invoke_does_not_misclassify_other_non_zero_as_budget() -> None:
     # Important: NOT the budget subclass — `isinstance` will fail if we
     # accidentally widen the detector.
     assert not isinstance(exc_info.value, LLMBudgetExhaustedError)
+
+
+# === iter-7 Phase 2: LLMTimeoutError carries buffered stdout ===
+
+
+@pytest.mark.asyncio
+async def test_invoke_timeout_includes_buffered_stdout() -> None:
+    """When `claude -p` times out mid-call, the adapter must drain
+    whatever buffered stdout is available and include it in the
+    raised LLMTimeoutError. iter-6 demo's Architect timeout produced
+    a bare "claude -p timed out after 300s" with no diagnostic data;
+    iter-5 Phase 4 closed the same gap for the non-zero-exit path.
+    See iter_6_demo_report.md Failure 1 + iter_7.md Phase 2."""
+    client = ClaudeCodeHeadlessClient()
+
+    class _HangingProc:
+        returncode = None
+        _killed = False
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            if not self._killed:
+                # First call (under wait_for) hangs indefinitely so wait_for
+                # raises TimeoutError; in this test we short-circuit by
+                # patching wait_for itself, so this branch is unreachable.
+                # Kept for symmetry / safety.
+                raise AssertionError("first communicate should not be reached")
+            return b"partial buffered stdout from claude", b""
+
+        def kill(self) -> None:
+            self._killed = True
+
+        async def wait(self) -> None:
+            return None
+
+    async def _fake_create(*_cmd: str, **_kwargs: Any) -> _HangingProc:
+        return _HangingProc()
+
+    async def _fake_wait_for(coro: Any, timeout: float) -> Any:  # noqa: ASYNC109
+        # Close the coroutine so the event loop doesn't warn about it.
+        coro.close()
+        raise TimeoutError("simulated wait_for timeout")
+
+    with (
+        patch(
+            "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=_fake_create),
+        ),
+        patch(
+            "core.llm.claude_code_headless.asyncio.wait_for",
+            new=_fake_wait_for,
+        ),
+        pytest.raises(LLMTimeoutError, match="partial buffered stdout"),
+    ):
+        await client.invoke(
+            system_prompt="sp",
+            user_message="u",
+            model="haiku",
+            timeout_s=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_invoke_timeout_tolerates_drain_failure() -> None:
+    """When the post-kill stdout drain itself raises (e.g. pipe closed
+    abruptly), the adapter must still raise LLMTimeoutError — drain
+    failure is non-fatal, just degrades diagnostics."""
+    client = ClaudeCodeHeadlessClient()
+
+    class _HangingProc:
+        returncode = None
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            raise OSError("pipe closed during drain")
+
+        def kill(self) -> None:
+            return None
+
+        async def wait(self) -> None:
+            return None
+
+    async def _fake_create(*_cmd: str, **_kwargs: Any) -> _HangingProc:
+        return _HangingProc()
+
+    async def _fake_wait_for(coro: Any, timeout: float) -> Any:  # noqa: ASYNC109
+        coro.close()
+        raise TimeoutError("simulated wait_for timeout")
+
+    with (
+        patch(
+            "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=_fake_create),
+        ),
+        patch(
+            "core.llm.claude_code_headless.asyncio.wait_for",
+            new=_fake_wait_for,
+        ),
+        pytest.raises(LLMTimeoutError, match="timed out after"),
+    ):
+        await client.invoke(
+            system_prompt="sp",
+            user_message="u",
+            model="haiku",
+            timeout_s=1,
+        )
 
 
 def test_is_budget_exhausted_stdout_robust_against_truncated_json() -> None:
