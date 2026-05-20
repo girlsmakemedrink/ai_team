@@ -99,6 +99,10 @@ class TeamLeadAgent(BaseAgent):
     system_prompt_path: ClassVar[Path] = (
         Path(__file__).resolve().parents[2] / "prompts" / "team_lead.md"
     )
+    # TL decomposition turns are short (~30 s observed across iter-3..10
+    # demos). Stays at 300 after iter-11 flipped BaseAgent's default
+    # to 600.
+    llm_timeout_s: ClassVar[int] = 300
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if incoming.message_type != MessageType.TASK_ASSIGNMENT:

@@ -109,6 +109,9 @@ class SRESupportAgent(BaseAgent):
     mcp_env: ClassVar[dict[str, str]] = {
         "AI_TEAM_PATH_PREFIXES": "docs/runbooks,infra/monitoring",
     }
+    # SRE summarises runbook drafts; turns finish well under 300 s.
+    # Stays at 300 after iter-11 flipped BaseAgent's default to 600.
+    llm_timeout_s: ClassVar[int] = 300
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if not isinstance(incoming.payload, TaskAssignmentPayload):

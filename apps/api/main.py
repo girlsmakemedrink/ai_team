@@ -52,8 +52,13 @@ from core.messaging.schemas import (
     TaskAssignmentPayload,
 )
 from core.observability import configure_logging, render_metrics
-from core.persistence.models import Checkpoint, PendingReview, Task
+from core.persistence.models import AuditLog, Checkpoint, PendingReview, Task
 from core.persistence.task_state import TaskStateReducer
+from core.retry.retry_blocked import (
+    RetryNotEligible,
+    build_retry_message,
+    check_retry_eligibility,
+)
 from core.security.hmac_signer import HMACSigner
 
 _log = structlog.get_logger(__name__)
@@ -261,6 +266,110 @@ async def submit_task(req: SubmitTaskRequest, request: Request) -> SubmitTaskRes
         correlation_id=str(correlation_id),
     )
     return SubmitTaskResponse(task_id=task_id, correlation_id=correlation_id, status="queued")
+
+
+# === Retry blocked ===
+
+
+class RetryBlockedBody(BaseModel):
+    comment: str | None = None
+
+
+class RetryBlockedResponse(BaseModel):
+    task_id: UUID
+    correlation_id: UUID
+    retry_attempt: int
+    status: str
+
+
+async def _audit_rows_for_task(
+    session_factory: async_sessionmaker[Any], task_id: UUID
+) -> list[AgentMessage]:
+    """Reconstruct AgentMessages from audit_log rows mentioning task_id.
+
+    Both `task_assignment` and `task_report` payloads carry `task_id`
+    at `payload_json.payload.task_id`. JSON-path filter; small audit
+    table → sequential scan acceptable through iter-15+.
+    """
+    async with session_factory() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(AuditLog)
+                    .where(AuditLog.payload_json["payload"]["task_id"].astext == str(task_id))
+                    .order_by(AuditLog.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [AgentMessage.model_validate(r.payload_json) for r in rows]
+
+
+@app.post(
+    "/api/tasks/{task_id}/retry",
+    response_model=RetryBlockedResponse,
+    dependencies=[Depends(require_owner_token)],
+)
+async def retry_blocked_task(
+    task_id: UUID, body: RetryBlockedBody, request: Request
+) -> RetryBlockedResponse:
+    """Owner-initiated retry for a BLOCKED task with a recoverable blocked_on.
+
+    See iter-11 Phase 1. Re-emits the original task_assignment with the
+    same task_id and correlation_id (HoldQueue dependents key off
+    task_id) but a fresh message_id and bumped retry_attempt metadata.
+    Capped at 5 attempts total.
+    """
+    session_factory: async_sessionmaker[Any] = request.app.state.session_factory
+    rows = await _audit_rows_for_task(session_factory, task_id)
+    try:
+        eligibility = check_retry_eligibility(task_id, rows)
+    except RetryNotEligible as e:
+        detail = str(e)
+        if "no such task" in detail:
+            raise HTTPException(status_code=404, detail=detail) from e
+        if "not currently blocked" in detail or "no report yet" in detail:
+            raise HTTPException(status_code=409, detail=detail) from e
+        if "retry cap reached" in detail:
+            raise HTTPException(status_code=429, detail=detail) from e
+        raise HTTPException(status_code=422, detail=detail) from e
+
+    retry_msg = build_retry_message(
+        original=eligibility.original_assignment,
+        retry_attempt=eligibility.retry_attempt,
+    )
+    signer: HMACSigner = request.app.state.signer
+    signed = signer.with_signature(retry_msg)
+
+    audit: AuditLogWriter = request.app.state.audit
+    await audit.write_message(signed, iteration=1)
+    feed: FeedPublisher = request.app.state.feed
+    await feed.publish(signed)
+    bus: MessageBus = request.app.state.bus
+    await bus.publish(signed)
+
+    # Flip tasks.status from blocked back to in_progress so the rollup
+    # state matches reality. Idempotent: leave any other status alone
+    # (the dispatcher may have already moved this row).
+    async with session_factory() as session:
+        row = (await session.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+        if row is not None and row.status == "blocked":
+            row.status = "in_progress"
+            await session.commit()
+
+    _log.info(
+        "api.task.retry",
+        task_id=str(task_id),
+        retry_attempt=eligibility.retry_attempt,
+        comment=body.comment,
+    )
+    return RetryBlockedResponse(
+        task_id=task_id,
+        correlation_id=signed.correlation_id,
+        retry_attempt=eligibility.retry_attempt,
+        status="requeued",
+    )
 
 
 # === Reviews ===

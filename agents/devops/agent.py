@@ -71,7 +71,7 @@ class DevOpsAgent(BaseAgent):
     mcp_env: ClassVar[dict[str, str]] = {
         "AI_TEAM_PATH_PREFIXES": ("infra,.github/workflows,Makefile,docker-compose.yml,scripts"),
     }
-    llm_timeout_s: ClassVar[int] = 600
+    # Inherits BaseAgent's iter-11 default of 600 s.
     max_turns: ClassVar[int] = 20
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:

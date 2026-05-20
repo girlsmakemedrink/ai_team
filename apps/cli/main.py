@@ -281,6 +281,37 @@ def reject(ctx: click.Context, review_id: UUID, comment: str) -> None:
     _resolve_review(ctx, review_id, "reject", comment)
 
 
+@cli.command(name="retry-blocked")
+@click.argument("task_id", type=click.UUID)
+@click.option("--comment", default=None, help="Optional comment to attach.")
+@click.pass_context
+def retry_blocked(ctx: click.Context, task_id: UUID, comment: str | None) -> None:
+    """Re-emit a BLOCKED task_assignment so the agent retries."""
+    resp = httpx.post(
+        f"{_api_base(ctx)}/api/tasks/{task_id}/retry",
+        json={"comment": comment},
+        headers=_token_header(ctx),
+        timeout=15.0,
+    )
+    if resp.status_code != 200:
+        console.print(f"[red]Failed: {resp.status_code} {resp.text}[/]")
+        sys.exit(1)
+    data = resp.json()
+    correlation_short = str(data["correlation_id"])[:8]
+    console.print(
+        Panel(
+            f"[bold]Task requeued.[/]\n"
+            f"  task_id:        {data['task_id']}\n"
+            f"  correlation_id: {data['correlation_id']}\n"
+            f"  retry_attempt:  {data['retry_attempt']}\n"
+            f"  status:         {data['status']}\n\n"
+            f"[dim]Tail with:[/] ai-team watch --correlation {correlation_short}",
+            title="Retry submitted",
+            style="green",
+        )
+    )
+
+
 def _resolve_review(ctx: click.Context, review_id: UUID, verb: str, comment: str | None) -> None:
     resp = httpx.post(
         f"{_api_base(ctx)}/api/reviews/{review_id}/{verb}",
