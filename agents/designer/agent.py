@@ -98,11 +98,8 @@ def _render_design_markdown(*, design: dict[str, Any]) -> str:
 class DesignerAgent(BaseAgent):
     role: ClassVar[AgentId] = AgentId.DESIGNER
     model_tier: ClassVar = "sonnet"
-    # iter-8: UX brief + wireframe drafting on the v2 task reliably
-    # takes 3-5 min on Sonnet; the 300 s BaseAgent default timed out
-    # in the iter-7 demo. Match Architect / Backend / Frontend /
-    # DevOps's 600 s.
-    llm_timeout_s: ClassVar[int] = 600
+    # Inherits BaseAgent's iter-11 default of 600 s. iter-8: UX brief +
+    # wireframe drafting on the v2 task reliably takes 3-5 min on Sonnet.
     allowed_tools: ClassVar[tuple[str, ...]] = (
         "Read",
         "Glob",

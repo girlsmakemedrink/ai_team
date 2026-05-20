@@ -103,6 +103,10 @@ class ProductManagerAgent(BaseAgent):
     model_tier: ClassVar = "sonnet"
     allowed_tools: ClassVar[tuple[str, ...]] = ()
     system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "product_manager.md"
+    # iter-3 demo: PM's user-story decomposition averaged ~150 s on
+    # Sonnet for the v2 spec, well inside 300 s. Stays at 300 after
+    # iter-11 flipped BaseAgent's default to 600.
+    llm_timeout_s: ClassVar[int] = 300
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if incoming.message_type != MessageType.TASK_ASSIGNMENT or not isinstance(

@@ -88,9 +88,9 @@ class BackendDeveloperAgent(BaseAgent):
         "AI_TEAM_PATH_PREFIXES": "*",
         "AI_TEAM_PATH_DENY_PREFIXES": "infra/,.github/workflows/",
     }
-    # Multi-step workflow (read spec → write code → run tests → PR) needs
-    # a longer leash than the default; bump to give 6+ minutes per turn.
-    llm_timeout_s: ClassVar[int] = 600
+    # Multi-step workflow (read spec → write code → run tests → PR)
+    # inherits BaseAgent's iter-11 default of 600 s. max_turns stays
+    # bumped past BaseAgent's 8 because Backend's loop is long.
     max_turns: ClassVar[int] = 30
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
