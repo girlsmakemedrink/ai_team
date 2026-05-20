@@ -19,6 +19,14 @@ verbatim:
                   the mcp__-prefixed tool, not the MCP
                   server, and uses the word "unavailable"
                   rather than "never connected")
+  - iter-13 demo: "BLOCKER: mcp__ai_team_repo server never
+                    connected (ToolSearch tried 4 times across
+                    2 sessions)"
+                  (added iter-14 — different again: mixes
+                  the mcp__-prefixed tool name from iter-12
+                  with the "never connected" failure verb
+                  from iter-10; neither prior tuple catches
+                  the combination on its own)
 
 This module substring-matches those patterns and rewrites
 to `BLOCKED(blocked_on='mcp_unhealthy')` so dependents stay
@@ -57,6 +65,14 @@ _MCP_RACE_PATTERNS: tuple[tuple[str, ...], ...] = (
     # risk. See iter_11_demo_report.md Failure 1.
     ("mcp__ai_team_repo", "unavailable"),
     ("MCP tools", "unavailable"),
+    # iter-14: Backend's iter-13 demo retry wording —
+    # "BLOCKER: mcp__ai_team_repo server never connected
+    # (ToolSearch tried 4 times across 2 sessions)". Mixes
+    # iter-12's mcp__-prefixed tool name with iter-10's
+    # "never connected" failure verb; neither prior tuple
+    # catches the combination on its own. See
+    # iter_13_demo_report.md Failure 1.
+    ("mcp__ai_team_repo", "never connected"),
 )
 
 

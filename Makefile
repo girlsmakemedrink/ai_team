@@ -3,7 +3,7 @@
         test test-unit test-integration test-smoke test-real-llm \
         lint typecheck format format-check fix sec \
         migrate alembic-rev \
-        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 demo-iter-5 demo-iter-6 demo-iter-7 demo-iter-8 demo-iter-9 demo-iter-10 \
+        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 demo-iter-5 demo-iter-6 demo-iter-7 demo-iter-8 demo-iter-9 demo-iter-10 demo-iter-11 demo-iter-12 demo-iter-13 demo-iter-14 \
         clean
 
 help: ## Show available targets
@@ -96,9 +96,12 @@ alembic-rev: ## New alembic revision (usage: make alembic-rev MSG="description")
 smoke-llm: ## Validate `claude -p` substrate (ADR-008)
 	uv run python scripts/smoke_claude_p.py
 
-demo: demo-iter-13 ## Alias for the current iteration's demo
+demo: demo-iter-14 ## Alias for the current iteration's demo
 
-demo-iter-13: ## Run iter-13 e2e (session-id fallback + auto-retry-and-approve)
+demo-iter-14: ## Run iter-14 e2e (close pending_review loop with new router tuple)
+	bash scripts/demo_iter_14.sh
+
+demo-iter-13: ## Run iter-13 e2e — regression baseline (session-id fallback)
 	bash scripts/demo_iter_13.sh
 
 demo-iter-12: ## Run iter-12 e2e — regression baseline (router tuples)
