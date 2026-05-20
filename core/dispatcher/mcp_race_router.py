@@ -13,6 +13,12 @@ verbatim:
   - iter-8 demo: "the ai-team-repo MCP server never finished
                   connecting (all three ToolSearch retries
                   returned 'still connecting')"
+  - iter-11 demo: "BLOCKED: ... mcp__ai_team_repo__* tools
+                    were unavailable throughout the session"
+                  (added iter-12 — different shape: names
+                  the mcp__-prefixed tool, not the MCP
+                  server, and uses the word "unavailable"
+                  rather than "never connected")
 
 This module substring-matches those patterns and rewrites
 to `BLOCKED(blocked_on='mcp_unhealthy')` so dependents stay
@@ -34,12 +40,23 @@ from core.messaging.schemas import AgentMessage, TaskReportPayload, TaskStatus
 
 # Each tuple is one pattern: ALL substrings must appear in the
 # summary for that pattern to match. Derived from iter-8 +
-# iter-9 demo Backend reports verbatim. Add new patterns here
-# (not regex) when a new shape appears in a real-LLM demo.
+# iter-9 + iter-11 demo Backend reports verbatim. Add new
+# patterns here (not regex) when a new shape appears in a
+# real-LLM demo.
 _MCP_RACE_PATTERNS: tuple[tuple[str, ...], ...] = (
     ("MCP server", "never connected"),
     ("MCP server", "never finished connecting"),
     ("MCP server", "still connecting"),
+    # iter-12: Backend's iter-11 demo wording —
+    # "mcp__ai_team_repo__* tools were unavailable
+    # throughout the session". The first tuple catches the
+    # mcp__-prefixed phrasing exactly; the second catches
+    # the slightly more general "MCP tools" + "unavailable"
+    # form a future run might emit. Both still require
+    # both substrings to co-occur — near-zero false-positive
+    # risk. See iter_11_demo_report.md Failure 1.
+    ("mcp__ai_team_repo", "unavailable"),
+    ("MCP tools", "unavailable"),
 )
 
 
