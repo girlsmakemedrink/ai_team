@@ -14,7 +14,10 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (  # noqa: TC002 runtime fixture types
+    AsyncSession,
+    async_sessionmaker,
+)
 
 from core.persistence.models import PendingReview
 from tools.mcp_servers.ai_team_tasks.handlers import (
@@ -48,9 +51,7 @@ async def test_request_human_review_writes_row_to_postgres(
 
     async with session_factory() as s:
         row = (
-            await s.execute(
-                select(PendingReview).where(PendingReview.correlation_id == cid)
-            )
+            await s.execute(select(PendingReview).where(PendingReview.correlation_id == cid))
         ).scalar_one()
     assert str(row.id) == review_id
     assert row.requesting_agent == "qa_engineer"
@@ -64,9 +65,7 @@ async def test_request_human_review_writes_row_to_postgres(
 async def test_request_human_review_two_calls_two_rows(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    ctx = Context(
-        session_factory=session_factory, default_agent="frontend_developer"
-    )
+    ctx = Context(session_factory=session_factory, default_agent="frontend_developer")
     cid_a, cid_b = uuid4(), uuid4()
     for cid, summary in ((cid_a, "first"), (cid_b, "second")):
         result = await handle_request_human_review(

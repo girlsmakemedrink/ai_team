@@ -10,7 +10,9 @@ iter-17: added `initialize` handler (commit `8022b9e`).
 
 Exposes:
 - mcp__ai_team_tasks__mark_task_done(task_id, summary, artifacts)  STUB
-- mcp__ai_team_tasks__request_human_review(summary, correlation_id, agent?, task_id?, target_artifact?)
+- mcp__ai_team_tasks__request_human_review(
+    summary, correlation_id, agent?, task_id?, target_artifact?
+  )
 - mcp__ai_team_tasks__update_task_status(task_id, status, progress_pct)  STUB
 """
 

@@ -78,9 +78,7 @@ def _ok_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def handle_request_human_review(
-    ctx: Context, args: dict[str, Any]
-) -> dict[str, Any]:
+async def handle_request_human_review(ctx: Context, args: dict[str, Any]) -> dict[str, Any]:
     """INSERT a pending_reviews row; return the new row's UUID."""
     summary = str(args.get("summary", "")).strip()
     if not summary:
@@ -135,13 +133,9 @@ async def handle_mark_task_done(_ctx: Context, _args: dict[str, Any]) -> dict[st
     return _ok_text("[stub] mark_task_done not implemented yet (deferred per iter-18)")
 
 
-async def handle_update_task_status(
-    _ctx: Context, _args: dict[str, Any]
-) -> dict[str, Any]:
+async def handle_update_task_status(_ctx: Context, _args: dict[str, Any]) -> dict[str, Any]:
     """STUB — deferred per iter-18 scope (audit prompts first)."""
-    return _ok_text(
-        "[stub] update_task_status not implemented yet (deferred per iter-18)"
-    )
+    return _ok_text("[stub] update_task_status not implemented yet (deferred per iter-18)")
 
 
 HANDLERS = {

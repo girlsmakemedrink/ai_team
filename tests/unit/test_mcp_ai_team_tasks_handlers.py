@@ -19,15 +19,16 @@ must update those tests explicitly.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator  # noqa: TC003 runtime fixture types
+from typing import cast
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import Table, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from core.persistence.models import PendingReview
+from core.persistence.models import Base, PendingReview
 from tools.mcp_servers.ai_team_tasks.handlers import (
     Context,
     handle_mark_task_done,
@@ -40,8 +41,11 @@ from tools.mcp_servers.ai_team_tasks.handlers import (
 async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
-        # Only PendingReview is needed for these unit tests.
-        await conn.run_sync(PendingReview.__table__.create)
+        # Only the pending_reviews table is exercised here; create just it.
+        # SQLAlchemy types `__table__` as `FromClause`; the concrete subclass
+        # is `Table`, which is what `create_all(tables=...)` expects.
+        tables = [cast("Table", PendingReview.__table__)]
+        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
     yield async_sessionmaker(engine, expire_on_commit=False)
     await engine.dispose()
 
