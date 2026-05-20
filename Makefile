@@ -96,9 +96,12 @@ alembic-rev: ## New alembic revision (usage: make alembic-rev MSG="description")
 smoke-llm: ## Validate `claude -p` substrate (ADR-008)
 	uv run python scripts/smoke_claude_p.py
 
-demo: demo-iter-11 ## Alias for the current iteration's demo
+demo: demo-iter-12 ## Alias for the current iteration's demo
 
-demo-iter-11: ## Run iter-11 e2e (retry-blocked CLI + Bash defense + timeout refactor)
+demo-iter-12: ## Run iter-12 e2e (router tuples + retry-blocked close-the-loop)
+	bash scripts/demo_iter_12.sh
+
+demo-iter-11: ## Run iter-11 e2e — regression baseline (retry-blocked)
 	bash scripts/demo_iter_11.sh
 
 demo-iter-10: ## Run iter-10 e2e — regression baseline (substring router)
