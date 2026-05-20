@@ -101,7 +101,13 @@ def _render_markdown(plan: dict[str, Any], incoming: AgentMessage) -> str:
 class ProductManagerAgent(BaseAgent):
     role: ClassVar[AgentId] = AgentId.PRODUCT_MANAGER
     model_tier: ClassVar = "sonnet"
-    allowed_tools: ClassVar[tuple[str, ...]] = ()
+    # iter-19: explicit non-empty whitelist replaces iter-3's `()`
+    # which fell back to claude -p's permissive default (all configured
+    # MCP + native tools allowed) — see iter_18_demo_report.md Caveat
+    # 1. PM emits one structured-JSON turn via --json-schema;
+    # Read/Glob/Grep cover the rare case of consulting docs/backlog/
+    # for prior stories. No MCP tools, no Write/Edit, no Bash.
+    allowed_tools: ClassVar[tuple[str, ...]] = ("Read", "Glob", "Grep")
     system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "product_manager.md"
     # iter-3 demo: PM's user-story decomposition averaged ~150 s on
     # Sonnet for the v2 spec, well inside 300 s. Stays at 300 after

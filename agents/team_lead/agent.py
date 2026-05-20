@@ -95,7 +95,14 @@ DECOMPOSITION_SCHEMA: dict[str, object] = {
 class TeamLeadAgent(BaseAgent):
     role: ClassVar[AgentId] = AgentId.TEAM_LEAD
     model_tier: ClassVar = "opus"
-    allowed_tools: ClassVar[tuple[str, ...]] = ()
+    # iter-19: explicit non-empty whitelist replaces iter-1's `()`
+    # which fell back to claude -p's permissive default (all configured
+    # MCP + native tools allowed) — see iter_18_demo_report.md Caveat
+    # 1. TL emits one structured-JSON decomposition turn;
+    # Read/Glob/Grep cover consulting docs/iterations/ or
+    # docs/sandbox/ for the source spec. No MCP tools, no Write/Edit,
+    # no Bash.
+    allowed_tools: ClassVar[tuple[str, ...]] = ("Read", "Glob", "Grep")
     system_prompt_path: ClassVar[Path] = (
         Path(__file__).resolve().parents[2] / "prompts" / "team_lead.md"
     )
