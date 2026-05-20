@@ -73,6 +73,13 @@ class BackendDeveloperAgent(BaseAgent):
         "mcp__ai_team_tasks__mark_task_done",
         "mcp__ai_team_tasks__request_human_review",
     )
+    # iter-11: --allowed-tools already excludes Bash, but iter-10
+    # demo Backend reported "Bash hooks blocked the pytest command"
+    # anyway — the LLM was perceiving Bash as available and trying it.
+    # Belt-and-suspenders: name Bash in --disallowed-tools so claude -p
+    # denies it explicitly before the LLM even tries. See
+    # iter_10_demo_report.md Failure 1.
+    disallowed_tools: ClassVar[tuple[str, ...]] = ("Bash",)
     system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "backend_developer.md"
     # Per ADR-004 path-scope row: writes anywhere in target_repo EXCEPT
     # infra/ and .github/workflows/ (DevOps territory). `*` allow plus
