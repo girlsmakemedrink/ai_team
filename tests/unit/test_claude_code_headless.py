@@ -585,3 +585,152 @@ async def test_invoke_captures_marker_up_to_8kb_stdout() -> None:
         pytest.raises(LLMBudgetExhaustedError),
     ):
         await client.invoke(system_prompt="sp", user_message="u", model="sonnet")
+
+
+# iter-13: session-id collision retry tests. iter-12 demo
+# (correlation 3d442628-...) hit "Session ID is already in use"
+# when a dispatcher restart left a stale session on disk. The
+# adapter now retries once with --resume.
+
+
+class _ScriptedProc:
+    """Subprocess stand-in returning a pre-set returncode/stdout/stderr."""
+
+    def __init__(self, returncode: int, stdout: bytes, stderr: bytes) -> None:
+        self.returncode = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        return self._stdout, self._stderr
+
+
+@pytest.mark.asyncio
+async def test_session_id_collision_retries_with_resume() -> None:
+    """iter-12 demo (corr 3d442628) hit `Session ID ... already
+    in use` when the dispatcher restarted between a Backend
+    BLOCKED report and the retry. The adapter now detects the
+    collision in stderr, swaps --session-id for --resume, and
+    re-spawns once. iter-13.
+    """
+    client = ClaudeCodeHeadlessClient()
+    captured_argvs: list[tuple[str, ...]] = []
+    call_count = [0]
+
+    async def _fake_create(*cmd: str, **_: Any) -> _ScriptedProc:
+        captured_argvs.append(cmd)
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return _ScriptedProc(
+                returncode=1,
+                stdout=b"",
+                stderr=(
+                    b"Error: Session ID 3d442628-b4e2-4233-8ba1-834b460e2477 is already in use.\n"
+                ),
+            )
+        payload = {
+            "is_error": False,
+            "result": "ok",
+            "session_id": "3d442628-b4e2-4233-8ba1-834b460e2477",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+        return _ScriptedProc(returncode=0, stdout=_stdout(payload), stderr=b"")
+
+    with patch(
+        "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+        new=AsyncMock(side_effect=_fake_create),
+    ):
+        response = await client.invoke(
+            system_prompt="sp",
+            user_message="u",
+            model="haiku",
+            session_id="3d442628-b4e2-4233-8ba1-834b460e2477",
+        )
+
+    assert call_count[0] == 2
+    assert "--session-id" in captured_argvs[0]
+    assert "--resume" not in captured_argvs[0]
+    assert "--resume" in captured_argvs[1]
+    assert "--session-id" not in captured_argvs[1]
+    assert response.text == "ok"
+
+
+@pytest.mark.asyncio
+async def test_non_session_error_still_raises_invocation_error() -> None:
+    """Regression: non-collision errors must still raise
+    LLMInvocationError on the first spawn with no retry. The
+    detector is two-substring-match against stderr; a generic
+    flag error must NOT trigger the --resume retry path.
+    """
+    client = ClaudeCodeHeadlessClient()
+    call_count = [0]
+
+    async def _fake_create(*_cmd: str, **_: Any) -> _ScriptedProc:
+        call_count[0] += 1
+        return _ScriptedProc(
+            returncode=1,
+            stdout=b"",
+            stderr=b"Error: unknown flag --some-other-flag\n",
+        )
+
+    with (
+        patch(
+            "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=_fake_create),
+        ),
+        pytest.raises(LLMInvocationError, match="some-other-flag"),
+    ):
+        await client.invoke(
+            system_prompt="sp",
+            user_message="u",
+            model="haiku",
+            session_id="sid-x",
+        )
+    assert call_count[0] == 1  # No retry happened.
+
+
+@pytest.mark.asyncio
+async def test_session_id_collision_caches_for_subsequent_calls() -> None:
+    """After a successful collision-retry, subsequent invokes
+    with the same session_id go directly to --resume (no failed
+    first spawn). Pins the cache update after retry.
+    """
+    client = ClaudeCodeHeadlessClient()
+    captured_argvs: list[tuple[str, ...]] = []
+    call_count = [0]
+
+    async def _fake_create(*cmd: str, **_: Any) -> _ScriptedProc:
+        captured_argvs.append(cmd)
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return _ScriptedProc(
+                returncode=1,
+                stdout=b"",
+                stderr=b"Error: Session ID sid-y is already in use.\n",
+            )
+        payload = {
+            "is_error": False,
+            "result": "ok",
+            "session_id": "sid-y",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+        return _ScriptedProc(returncode=0, stdout=_stdout(payload), stderr=b"")
+
+    with patch(
+        "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+        new=AsyncMock(side_effect=_fake_create),
+    ):
+        await client.invoke(
+            system_prompt="sp", user_message="u1", model="haiku", session_id="sid-y"
+        )
+        await client.invoke(
+            system_prompt="sp", user_message="u2", model="haiku", session_id="sid-y"
+        )
+
+    # First invoke: 2 spawns (--session-id, then --resume after collision).
+    # Second invoke: 1 spawn (--resume directly).
+    assert call_count[0] == 3
+    assert "--session-id" in captured_argvs[0]
+    assert "--resume" in captured_argvs[1]
+    assert "--resume" in captured_argvs[2]
+    assert "--session-id" not in captured_argvs[2]
