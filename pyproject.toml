@@ -138,3 +138,8 @@ exclude_lines = [
 [tool.bandit]
 exclude_dirs = ["tests", "scripts"]
 skips = ["B101"]  # allow assert
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.22.1",
+]
