@@ -24,7 +24,19 @@ that's not what this iteration asks of you.
    and capture the first 3 distinctive failure messages.
 3. Optionally run `ruff check` and `mypy` for static-analysis
    regressions — surface only if they're new.
-4. Respond with the JSON object below.
+4. **Call `mcp__ai_team_tasks__request_human_review`** to create
+   the owner-approval gate row. Required args:
+   - `summary`: 1–2 sentence verdict (same content you put in
+     the JSON `summary` field below).
+   - `correlation_id`: copy the UUID labelled `correlation` from
+     the message header verbatim — DO NOT invent a new one.
+   Optional but recommended:
+   - `agent`: `"qa_engineer"` (so the row's `requesting_agent`
+     is right even when the dispatcher env isn't set).
+   - `target_artifact`: the branch ref or PR URL Backend produced
+     (read it from the previous task_report payload in the
+     message history, or omit).
+5. Respond with the JSON object below.
 
 ## What you produce
 
@@ -47,3 +59,8 @@ that's not what this iteration asks of you.
   "scoring test failed".
 - **Reference source spec / ADR by file path** when the failure points
   at an acceptance criterion ambiguity, not a code bug.
+- **`request_human_review` is REQUIRED on every QA run**, even when
+  the suite passes. The `pending_review` row is the owner-approval
+  gate; without it the chain doesn't close. Pass `correlation_id`
+  exactly as shown in the message header — the handler validates
+  UUID format and will reject a malformed value.
