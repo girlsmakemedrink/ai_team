@@ -174,6 +174,38 @@ def test_routes_iter11_demo_backend_summary_to_blocked() -> None:
     assert out.payload.summary == summary
 
 
+def test_routes_iter13_demo_backend_summary_to_blocked() -> None:
+    """iter-13 demo (correlation 1e7bb0db-a109-4521-ad03-
+    175e9fdd3d67) Backend's retry session (row 180) reported
+    the failure with a THIRD distinct phrasing that mixes
+    iter-12's mcp__-prefixed tool name with iter-10's
+    'never connected' failure verb:
+
+      '... BLOCKER: mcp__ai_team_repo server never
+      connected (ToolSearch tried 4 times across 2
+      sessions); Bash tool auto-approve ...'
+
+    Neither iter-10's three tuples nor iter-12's two
+    tuples catch this combination. iter-14 adds one more.
+    Pinned verbatim from `iter_13_demo_report.md` Failure 1.
+    """
+    summary = (
+        "Backend Developer: tests failed. All 7 source/test "
+        "files are written and verified via grep, but "
+        "BLOCKER: mcp__ai_team_repo server never connected "
+        "(ToolSearch tried 4 times across 2 sessions); "
+        "Bash tool auto-approve for git/uv was also blocked "
+        "for the duration of this session."
+    )
+    out = maybe_route_mcp_race_to_blocked(_failed_report(summary))
+    assert isinstance(out.payload, TaskReportPayload)
+    assert out.payload.status == TaskStatus.BLOCKED
+    assert out.payload.blocked_on == "mcp_unhealthy"
+    # Verbatim summary preserved — owner needs the LLM's
+    # original wording for diagnosis.
+    assert out.payload.summary == summary
+
+
 def test_leaves_non_task_report_messages_unchanged() -> None:
     """Task assignments, broadcasts, etc. pass through
     untouched even when payload text happens to contain
