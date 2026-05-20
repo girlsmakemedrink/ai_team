@@ -3,7 +3,7 @@
         test test-unit test-integration test-smoke test-real-llm \
         lint typecheck format format-check fix sec \
         migrate alembic-rev \
-        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 demo-iter-5 demo-iter-6 demo-iter-7 demo-iter-8 demo-iter-9 demo-iter-10 demo-iter-11 demo-iter-12 demo-iter-13 demo-iter-14 demo-iter-15 demo-iter-16 \
+        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 demo-iter-5 demo-iter-6 demo-iter-7 demo-iter-8 demo-iter-9 demo-iter-10 demo-iter-11 demo-iter-12 demo-iter-13 demo-iter-14 demo-iter-15 demo-iter-16 demo-iter-17 \
         clean
 
 help: ## Show available targets
@@ -96,9 +96,12 @@ alembic-rev: ## New alembic revision (usage: make alembic-rev MSG="description")
 smoke-llm: ## Validate `claude -p` substrate (ADR-008)
 	uv run python scripts/smoke_claude_p.py
 
-demo: demo-iter-16 ## Alias for the current iteration's demo
+demo: demo-iter-17 ## Alias for the current iteration's demo
 
-demo-iter-16: ## Run iter-16 e2e (two new verbs + close pending_review loop)
+demo-iter-17: ## Run iter-17 e2e (MCP initialize handshake fix + close loop)
+	bash scripts/demo_iter_17.sh
+
+demo-iter-16: ## Run iter-16 e2e — regression baseline (verb-set extension)
 	bash scripts/demo_iter_16.sh
 
 demo-iter-15: ## Run iter-15 e2e — regression baseline (cross-product matcher)
