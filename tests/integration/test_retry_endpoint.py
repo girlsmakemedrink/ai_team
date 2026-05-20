@@ -10,7 +10,10 @@ AuditLogWriter the API itself uses.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable  # noqa: TC003  used in runtime annotations
+from typing import (
+    TYPE_CHECKING,
+)
 from uuid import UUID, uuid4
 
 import httpx
@@ -29,7 +32,7 @@ from core.messaging.schemas import (
 from core.persistence.models import AuditLog, Task
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -139,8 +142,8 @@ def _done_report(task_id: UUID, correlation_id: UUID) -> AgentMessage:
 
 async def test_retry_emits_fresh_assignment_with_same_task_id(
     api_client: httpx.AsyncClient,
-    write_audit_message,  # type: ignore[no-untyped-def]
-    session_factory,  # type: ignore[no-untyped-def]
+    write_audit_message: Callable[[AgentMessage], Awaitable[int]],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     # 1. Submit a task → root assignment audit row + tasks row.
     resp = await api_client.post(
@@ -200,7 +203,7 @@ async def test_retry_emits_fresh_assignment_with_same_task_id(
 
 async def test_retry_rejects_done_task(
     api_client: httpx.AsyncClient,
-    write_audit_message,  # type: ignore[no-untyped-def]
+    write_audit_message: Callable[[AgentMessage], Awaitable[int]],
 ) -> None:
     resp = await api_client.post(
         "/api/tasks",

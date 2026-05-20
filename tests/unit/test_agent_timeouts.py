@@ -43,5 +43,5 @@ from agents.team_lead import TeamLeadAgent
         (TeamLeadAgent, 300),
     ],
 )
-def test_llm_timeout_s(cls: type, expected: int) -> None:
+def test_llm_timeout_s(cls: type[BaseAgent], expected: int) -> None:
     assert cls.llm_timeout_s == expected
