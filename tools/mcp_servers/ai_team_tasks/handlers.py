@@ -42,13 +42,17 @@ class Context:
     `session_factory` is the async SQLAlchemy session-maker
     used to write `pending_reviews` rows. `default_agent`
     is the fallback used when a `tools/call` payload omits
-    `agent`; orchestrator sets `AI_TEAM_AGENT_ROLE` per
-    invocation as defense-in-depth for LLMs that forget
-    to pass identity fields.
+    `agent`. `default_correlation_id` is the fallback when
+    the payload omits `correlation_id` — iter-19 adds this
+    after iter-18 demo Caveat 2 surfaced LLMs forgetting
+    the field. Both defaults source from env
+    (AI_TEAM_AGENT_ROLE / AI_TEAM_CORRELATION_ID) that
+    BaseAgent sets per-message in iter-19 Phase 1.
     """
 
     session_factory: async_sessionmaker[AsyncSession]
     default_agent: str
+    default_correlation_id: str | None = None
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Context:
@@ -59,6 +63,7 @@ class Context:
         return cls(
             session_factory=factory,
             default_agent=e.get("AI_TEAM_AGENT_ROLE", "unknown"),
+            default_correlation_id=e.get("AI_TEAM_CORRELATION_ID"),
         )
 
 
@@ -85,6 +90,12 @@ async def handle_request_human_review(ctx: Context, args: dict[str, Any]) -> dic
         return _err("summary is required and must be non-empty")
 
     cid_raw = str(args.get("correlation_id", "")).strip()
+    # iter-19 Phase 2: fall back to ctx.default_correlation_id when
+    # args omit the field. Mirror of iter-18's default_agent fallback —
+    # defense-in-depth for LLMs that forget to pass identity fields.
+    # See iter_18_demo_report.md Caveat 2 + iter_19.md Phase 2.
+    if not cid_raw and ctx.default_correlation_id:
+        cid_raw = ctx.default_correlation_id
     if not cid_raw:
         return _err("correlation_id is required")
     try:

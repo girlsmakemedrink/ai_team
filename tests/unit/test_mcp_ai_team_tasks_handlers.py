@@ -146,6 +146,44 @@ def test_context_from_env_reads_ai_team_agent_role() -> None:
     assert ctx.default_agent == "qa_engineer"
 
 
+# iter-19 Phase 2: correlation_id fallback (defense-in-depth mirror
+# of iter-18's default_agent fallback).
+
+
+@pytest.mark.asyncio
+async def test_request_human_review_defaults_correlation_id_from_ctx(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """When `correlation_id` is missing from args,
+    fall back to ctx.default_correlation_id sourced
+    from AI_TEAM_CORRELATION_ID env. Same
+    defense-in-depth pattern as default_agent. See
+    iter_19.md Phase 2."""
+    cid = str(uuid4())
+    ctx = Context(
+        session_factory=session_factory,
+        default_agent="qa_engineer",
+        default_correlation_id=cid,
+    )
+    result = await handle_request_human_review(
+        ctx, {"summary": "x", "agent": "qa_engineer"}
+    )
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["correlation_id"] == cid
+
+
+def test_context_from_env_reads_correlation_id() -> None:
+    cid = str(uuid4())
+    ctx = Context.from_env({"AI_TEAM_CORRELATION_ID": cid})
+    assert ctx.default_correlation_id == cid
+
+
+def test_context_from_env_correlation_id_none_when_unset() -> None:
+    ctx = Context.from_env({})
+    assert ctx.default_correlation_id is None
+
+
 @pytest.mark.asyncio
 async def test_mark_task_done_remains_stub(
     session_factory: async_sessionmaker[AsyncSession],
