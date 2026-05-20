@@ -38,7 +38,7 @@ from agents.team_lead import TeamLeadAgent
         (FrontendDeveloperAgent, 600),
         (QAEngineerAgent, 300),
         (MarketResearcherAgent, 300),
-        (ProductManagerAgent, 300),
+        (ProductManagerAgent, 600),
         (SRESupportAgent, 300),
         (TeamLeadAgent, 300),
     ],

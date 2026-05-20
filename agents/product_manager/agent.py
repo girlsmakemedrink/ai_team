@@ -109,10 +109,12 @@ class ProductManagerAgent(BaseAgent):
     # for prior stories. No MCP tools, no Write/Edit, no Bash.
     allowed_tools: ClassVar[tuple[str, ...]] = ("Read", "Glob", "Grep")
     system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "product_manager.md"
-    # iter-3 demo: PM's user-story decomposition averaged ~150 s on
-    # Sonnet for the v2 spec, well inside 300 s. Stays at 300 after
-    # iter-11 flipped BaseAgent's default to 600.
-    llm_timeout_s: ClassVar[int] = 300
+    # iter-19: bumped 300 → 600 after iter-18 demo run #1 hit the
+    # 300s wall and burned $1.75 on tenacity retries. iter-17 had
+    # already measured PM at 277s (92% of cap). Joins the LLM-bound
+    # majority (Backend / Architect / Designer / Frontend / DevOps)
+    # at the iter-11 default of 600s.
+    llm_timeout_s: ClassVar[int] = 600
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if incoming.message_type != MessageType.TASK_ASSIGNMENT or not isinstance(
