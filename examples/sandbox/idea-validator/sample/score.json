@@ -1,0 +1,10 @@
+{
+  "score": 7,
+  "components": {
+    "market": 5,
+    "competition": 2,
+    "risk": 2,
+    "differentiation": 5
+  },
+  "rationale": "Market=5/5, Competition=2/5, Risk=2/5, Differentiation=5/5 → raw=14 → score=7/10"
+}
