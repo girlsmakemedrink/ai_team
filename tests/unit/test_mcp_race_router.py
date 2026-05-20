@@ -144,6 +144,36 @@ def test_leaves_done_and_blocked_reports_unchanged() -> None:
     assert out_blocked.payload.blocked_on == "budget"  # not clobbered
 
 
+def test_routes_iter11_demo_backend_summary_to_blocked() -> None:
+    """iter-11 demo (correlation ccac21dc) Backend reported the
+    failure with phrasing that iter-10's three pattern tuples
+    didn't catch: '... mcp__ai_team_repo__* tools were
+    unavailable throughout the session ...'. iter-12 adds two
+    new tuples to capture this shape and slight broadenings.
+    Pinned verbatim from `iter_11_demo_report.md` Failure 1.
+    """
+    summary = (
+        "Backend Developer: tests failed. Found the "
+        "idea-validator v2 implementation substantially "
+        "complete under examples/sandbox/idea-validator: all "
+        "7 pipeline stages... BLOCKED: could not create "
+        "branch, run tests, or open PR — "
+        "mcp__ai_team_repo__* tools were unavailable "
+        "throughout the session and Bash is blocked for "
+        "git/uv/pytest per role constraints. Branch name "
+        "is the intended name; git operations must be "
+        "completed in a session where MCP tools are "
+        "available."
+    )
+    out = maybe_route_mcp_race_to_blocked(_failed_report(summary))
+    assert isinstance(out.payload, TaskReportPayload)
+    assert out.payload.status == TaskStatus.BLOCKED
+    assert out.payload.blocked_on == "mcp_unhealthy"
+    # Summary preserved verbatim — owner needs the LLM's
+    # original wording for diagnosis.
+    assert out.payload.summary == summary
+
+
 def test_leaves_non_task_report_messages_unchanged() -> None:
     """Task assignments, broadcasts, etc. pass through
     untouched even when payload text happens to contain
