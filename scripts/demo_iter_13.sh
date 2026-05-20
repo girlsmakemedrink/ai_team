@@ -156,15 +156,21 @@ echo "--- Frontend landing page: ---"
 echo
 
 step "6.5/7 — Auto-retry any BLOCKED Backend tasks (iter-13: close the loop)"
-if [[ "$review_count" -lt 1 ]] && command -v psql >/dev/null 2>&1; then
-    BLOCKED_TASK_ID=$(PGPASSWORD=ai_team psql -h 127.0.0.1 -U ai_team ai_team -t -A -c "
+if [[ "$review_count" -lt 1 ]]; then
+    # Query via `docker exec` against the postgres container so we
+    # don't depend on the host having a compatible psql client
+    # (iter-13 demo first run hit "password authentication failed"
+    # against the host's homebrew psql). `|| true` is defensive — any
+    # error here just leaves BLOCKED_TASK_ID empty and we skip the
+    # retry path.
+    BLOCKED_TASK_ID=$(docker exec ai_team_postgres psql -U ai_team -d ai_team -t -A -c "
         SELECT payload_json -> 'payload' ->> 'task_id'
         FROM audit_log
         WHERE correlation_id = '$CORRELATION'
           AND sender = 'backend_developer'
           AND payload_json -> 'payload' ->> 'status' = 'blocked'
         ORDER BY id DESC LIMIT 1;
-    " 2>/dev/null | tr -d '[:space:]')
+    " 2>/dev/null | tr -d '[:space:]' || true)
     if [[ -n "$BLOCKED_TASK_ID" ]]; then
         ok "Backend is BLOCKED on task $BLOCKED_TASK_ID — issuing ai-team retry-blocked"
         uv run ai-team retry-blocked "$BLOCKED_TASK_ID" || true
