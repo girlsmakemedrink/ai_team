@@ -46,9 +46,7 @@ class RetryEligibility:
     retry_attempt: int
 
 
-def check_retry_eligibility(
-    task_id: UUID, rows: Sequence[AgentMessage]
-) -> RetryEligibility:
+def check_retry_eligibility(task_id: UUID, rows: Sequence[AgentMessage]) -> RetryEligibility:
     """Inspect audit_log rows for ``task_id``. Raise if not retryable."""
     assignments = [
         r
@@ -77,15 +75,11 @@ def check_retry_eligibility(
             f"task {task_id} not currently blocked (status={payload.status.value})"
         )
     if payload.blocked_on not in RECOVERABLE_BLOCKED_ON:
-        raise RetryNotEligible(
-            f"task {task_id} blocked_on={payload.blocked_on!r} not recoverable"
-        )
+        raise RetryNotEligible(f"task {task_id} blocked_on={payload.blocked_on!r} not recoverable")
 
     attempt_number = len(assignments) + 1
     if attempt_number > RETRY_ATTEMPT_CAP:
-        raise RetryNotEligible(
-            f"task {task_id} retry cap reached ({RETRY_ATTEMPT_CAP} attempts)"
-        )
+        raise RetryNotEligible(f"task {task_id} retry cap reached ({RETRY_ATTEMPT_CAP} attempts)")
     return RetryEligibility(
         original_assignment=assignments[0],
         latest_report=latest_report,
@@ -93,9 +87,7 @@ def check_retry_eligibility(
     )
 
 
-def build_retry_message(
-    *, original: AgentMessage, retry_attempt: int
-) -> AgentMessage:
+def build_retry_message(*, original: AgentMessage, retry_attempt: int) -> AgentMessage:
     """Build the re-emit. Fresh message_id, same task_id+correlation_id."""
     return original.model_copy(
         update={
