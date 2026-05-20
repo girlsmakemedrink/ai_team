@@ -63,6 +63,26 @@ def _is_budget_exhausted_stdout(out: str) -> bool:
     return "error_max_budget_usd" in out
 
 
+_SESSION_COLLISION_MARKERS: tuple[str, ...] = ("Session ID", "already in use")
+
+
+def _is_session_id_collision_stderr(err: str) -> bool:
+    """True iff `claude -p` rejected --session-id because the id is
+    already on disk from a prior process.
+
+    iter-13: detected on `claude -p exited 1` with stderr matching
+    both markers. The dispatcher's in-memory `_claimed_sessions`
+    cache doesn't survive a process restart, so a retry-blocked
+    after a restart trips this — see iter_12_demo_report.md
+    Failure 1. The adapter retries once with --resume on a hit.
+
+    Both markers must co-occur — a generic "Session ID required"
+    error or unrelated "already in use" text won't trip the
+    fallback.
+    """
+    return all(m in err for m in _SESSION_COLLISION_MARKERS)
+
+
 class ClaudeCodeHeadlessClient:
     """Async wrapper around `claude -p ... --output-format json`.
 
@@ -177,12 +197,100 @@ class ClaudeCodeHeadlessClient:
         # unchanged (no env kwarg to create_subprocess_exec).
         effective_env = {**os.environ, **env} if env else None
 
+        returncode, stdout, stderr = await self._spawn_once(
+            cmd, timeout_s=timeout_s, env=effective_env, log=log
+        )
+
+        # iter-13: session-id collision under dispatcher restart. The
+        # in-memory _claimed_sessions cache doesn't survive process
+        # restart, so a retry-blocked after a restart tries
+        # --session-id on an id claude -p already created on disk and
+        # claude -p errors "Session ID is already in use". Detect the
+        # collision in stderr, swap --session-id for --resume, retry
+        # once. The retry's response replaces the original outputs;
+        # any non-collision error on the retry raises through the
+        # normal LLMInvocationError path below. See
+        # iter_12_demo_report.md Failure 1.
+        if (
+            returncode != 0
+            and session_id
+            and "--session-id" in cmd
+            and _is_session_id_collision_stderr(stderr.decode(errors="replace")[:1000])
+        ):
+            log.info(
+                "llm.invoke.session_collision.retry_with_resume",
+                session_id=session_id,
+            )
+            idx = cmd.index("--session-id")
+            cmd[idx] = "--resume"
+            # Cache the id so subsequent invokes skip the failed
+            # first spawn — they go straight to --resume.
+            self._claimed_sessions.add(session_id)
+            returncode, stdout, stderr = await self._spawn_once(
+                cmd, timeout_s=timeout_s, env=effective_env, log=log
+            )
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+
+        if returncode != 0:
+            err = stderr.decode(errors="replace")[:1000]
+            # iter-5: also capture stdout. iter-4 demo's Backend hit
+            # `exited 1` with EMPTY stderr — the actual error was on
+            # stdout. See iter_4_demo_report.md Failure 1.
+            # iter-8: cap raised 2 KB → 8 KB so real-LLM error JSONs
+            # (up to ~3-4 KB in practice) fit without truncating the
+            # marker. iter-7 demo Failure 2 surfaced the truncation
+            # gap. Substring detector below is the load-bearing fix;
+            # the larger cap is defense-in-depth + richer diagnostics.
+            out = stdout.decode(errors="replace")[:8000]
+            log.error(
+                "llm.invoke.failed",
+                returncode=returncode,
+                stderr=err,
+                stdout=out,
+            )
+            # iter-6: detect budget exhaustion specifically so the
+            # dispatcher can route it to BLOCKED instead of FAILED
+            # (no cascade-drop of dependents). See iter_6.md Phase 2.
+            if _is_budget_exhausted_stdout(out):
+                raise LLMBudgetExhaustedError(f"claude -p budget exhausted: stdout={out!r}")
+            raise LLMInvocationError(
+                f"claude -p exited {returncode}: stderr={err!r} stdout={out!r}"
+            )
+
+        response = self._parse_response(stdout, model_id=model_id, duration_ms=duration_ms)
+        log.info(
+            "llm.invoke.ok",
+            duration_ms=duration_ms,
+            tokens_in=response.tokens.input,
+            tokens_out=response.tokens.output,
+            cost_cents=response.cost_estimate_cents,
+            schema_requested=json_schema is not None,
+            validated_against_schema=response.validated_against_schema,
+        )
+        return response
+
+    async def _spawn_once(
+        self,
+        cmd: list[str],
+        *,
+        timeout_s: int,
+        env: dict[str, str] | None,
+        log: Any,
+    ) -> tuple[int, bytes, bytes]:
+        """Spawn claude -p once. Return (returncode, stdout, stderr).
+
+        Raises LLMTimeoutError on timeout, LLMInvocationError when
+        the binary is missing. Non-zero exits are returned as-is so
+        the caller can decide whether to retry (iter-13 session-id
+        collision) or escalate.
+        """
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=effective_env,
+                env=env,
             )
         except FileNotFoundError as e:
             raise LLMInvocationError(
@@ -217,45 +325,9 @@ class ClaudeCodeHeadlessClient:
                 f"claude -p timed out after {timeout_s}s; stdout={buffered_out!r}"
             ) from e
 
-        duration_ms = int((time.perf_counter() - start) * 1000)
-
-        if proc.returncode != 0:
-            err = stderr.decode(errors="replace")[:1000]
-            # iter-5: also capture stdout. iter-4 demo's Backend hit
-            # `exited 1` with EMPTY stderr — the actual error was on
-            # stdout. See iter_4_demo_report.md Failure 1.
-            # iter-8: cap raised 2 KB → 8 KB so real-LLM error JSONs
-            # (up to ~3-4 KB in practice) fit without truncating the
-            # marker. iter-7 demo Failure 2 surfaced the truncation
-            # gap. Substring detector below is the load-bearing fix;
-            # the larger cap is defense-in-depth + richer diagnostics.
-            out = stdout.decode(errors="replace")[:8000]
-            log.error(
-                "llm.invoke.failed",
-                returncode=proc.returncode,
-                stderr=err,
-                stdout=out,
-            )
-            # iter-6: detect budget exhaustion specifically so the
-            # dispatcher can route it to BLOCKED instead of FAILED
-            # (no cascade-drop of dependents). See iter_6.md Phase 2.
-            if _is_budget_exhausted_stdout(out):
-                raise LLMBudgetExhaustedError(f"claude -p budget exhausted: stdout={out!r}")
-            raise LLMInvocationError(
-                f"claude -p exited {proc.returncode}: stderr={err!r} stdout={out!r}"
-            )
-
-        response = self._parse_response(stdout, model_id=model_id, duration_ms=duration_ms)
-        log.info(
-            "llm.invoke.ok",
-            duration_ms=duration_ms,
-            tokens_in=response.tokens.input,
-            tokens_out=response.tokens.output,
-            cost_cents=response.cost_estimate_cents,
-            schema_requested=json_schema is not None,
-            validated_against_schema=response.validated_against_schema,
-        )
-        return response
+        # proc.returncode is set by communicate() — narrowing for mypy.
+        assert proc.returncode is not None
+        return proc.returncode, stdout, stderr
 
     async def reset_session(self, session_id: str) -> None:
         """Forget our local claim on this session id.
