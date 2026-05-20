@@ -259,6 +259,41 @@ def test_cross_product_does_not_match_unrelated_failures() -> None:
         assert out.payload.blocked_on is None
 
 
+def test_routes_iter15_demo_backend_retry_summary_to_blocked() -> None:
+    """iter-15 demo (correlation efbd0ccc-f607-4592-861a-
+    aaa74973dace) Backend's retry session (row 218) reported
+    the failure with two NEW verbs not in iter-15's
+    `_MCP_FAILURE_VERB_SET`: 'MCP tools ... were unreachable'
+    + 'blocked by the same MCP unavailability'. Both are
+    domain-specific synonyms of 'unavailable' / 'not
+    available' the LLM picked organically; `"unavailable"` is
+    NOT a substring of `"unavailability"` (position 9 differs:
+    'le' vs 'lity'). iter-16 adds both as set entries — the
+    cross-product design's intended extension path. Pinned
+    verbatim from `iter_15_demo_report.md` Failure 1.
+    """
+    summary = (
+        "Backend Developer: tests failed. The "
+        "idea-validator v2 implementation was already "
+        "substantially complete. Code audit identified "
+        "two spec violations that were fixed. Tests "
+        "could not be run: MCP tools (ai-team-repo) "
+        "were unreachable and native Bash is blocked "
+        "for pytest/uv per role constraints. Branch "
+        "creation, commit, push, and PR open are all "
+        "blocked by the same MCP unavailability. "
+        "Recommend re-running this task once the "
+        "ai-team-repo MCP server is healthy."
+    )
+    out = maybe_route_mcp_race_to_blocked(_failed_report(summary))
+    assert isinstance(out.payload, TaskReportPayload)
+    assert out.payload.status == TaskStatus.BLOCKED
+    assert out.payload.blocked_on == "mcp_unhealthy"
+    # Verbatim preserved — owner needs the LLM's wording for
+    # diagnosis.
+    assert out.payload.summary == summary
+
+
 def test_leaves_non_task_report_messages_unchanged() -> None:
     """Task assignments, broadcasts, etc. pass through
     untouched even when payload text happens to contain
