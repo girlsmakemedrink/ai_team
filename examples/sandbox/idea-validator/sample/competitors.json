@@ -1,0 +1,9 @@
+{
+  "items": [
+    {"name": "Coursera - Online Courses", "url": "https://coursera.org", "positioning": "Online learning marketplace with AI recommendations"},
+    {"name": "Wyzant - Tutor Marketplace", "url": "https://wyzant.com", "positioning": "Connect with expert tutors for personalised learning"},
+    {"name": "Chegg Tutors", "url": "https://chegg.com", "positioning": "On-demand tutoring and homework help"},
+    {"name": "Preply - Language Tutoring", "url": "https://preply.com", "positioning": "AI-matched tutors for language learning"},
+    {"name": "Superprof - Tutor Network", "url": "https://superprof.com", "positioning": "Largest network of tutors worldwide"}
+  ]
+}
