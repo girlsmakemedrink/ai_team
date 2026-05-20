@@ -65,6 +65,32 @@ def _is_budget_exhausted_stdout(out: str) -> bool:
 
 _SESSION_COLLISION_MARKERS: tuple[str, ...] = ("Session ID", "already in use")
 
+# iter-15: Anthropic Max-5x rolling session-window limit. claude -p
+# surfaces it as exit 1 + stdout JSON carrying `api_error_status=429`
+# + a `"You've hit your session limit · resets <time>"` result string.
+# Distinct shape from iter-6's `error_max_budget_usd` subtype (which
+# is the per-call --max-budget-usd flag's exhaust marker). iter-14
+# run #1 ($0.59 burned on Architect's truncated session) motivated
+# routing this to LLMBudgetExhaustedError so the dispatcher's iter-6
+# path emits BLOCKED(blocked_on='budget') and retry-blocked can
+# recover after the reset window opens.
+_QUOTA_SESSION_LIMIT_MARKERS: tuple[str, ...] = (
+    "api_error_status",
+    "429",
+    "session limit",
+)
+
+
+def _is_quota_session_limit_stdout(out: str) -> bool:
+    """True iff `claude -p` stdout carries all three Max-5x
+    session-limit markers. Substring-only, all-required match —
+    same near-zero-false-positive shape as the iter-6 budget detector
+    and the iter-13 collision detector. A generic HTTP 429 from an
+    unrelated subsystem won't trip this (must also have
+    `api_error_status` + the natural-language "session limit"
+    phrase that claude -p emits)."""
+    return all(m in out for m in _QUOTA_SESSION_LIMIT_MARKERS)
+
 
 def _is_session_id_collision_stderr(err: str) -> bool:
     """True iff `claude -p` rejected --session-id because the id is
@@ -254,6 +280,18 @@ class ClaudeCodeHeadlessClient:
             # (no cascade-drop of dependents). See iter_6.md Phase 2.
             if _is_budget_exhausted_stdout(out):
                 raise LLMBudgetExhaustedError(f"claude -p budget exhausted: stdout={out!r}")
+            # iter-15: Max-5x session-window limit (api_error_status=429)
+            # gets the same BLOCKED treatment so retry-blocked recovers
+            # after the reset window. See iter_14_demo_report.md Run #1.
+            if _is_quota_session_limit_stdout(out):
+                log.info(
+                    "llm.invoke.quota_session_limit",
+                    model=model,
+                    has_session=bool(session_id),
+                )
+                raise LLMBudgetExhaustedError(
+                    f"claude -p Max-5x session limit (api_error_status=429): stdout={out!r}"
+                )
             raise LLMInvocationError(
                 f"claude -p exited {returncode}: stderr={err!r} stdout={out!r}"
             )

@@ -206,6 +206,59 @@ def test_routes_iter13_demo_backend_summary_to_blocked() -> None:
     assert out.payload.summary == summary
 
 
+def test_routes_iter14_demo_backend_summary_to_blocked() -> None:
+    """iter-14 demo run #2 (correlation b6e21108-2f3e-41ef-b831-
+    c2bda9087a58) Backend row 201 reported the failure with a
+    FIFTH distinct phrasing — 'MCP server `ai-team-repo` failed
+    to connect' + 'tools ... were not available'. None of the
+    six iter-10/12/14 pattern tuples catches this combination.
+    iter-15 generalises to a cross-product matcher
+    (`_MCP_TOKEN_SET` x `_MCP_FAILURE_VERB_SET`) that catches it.
+    Pinned verbatim from `iter_14_demo_report.md` Run #2 row 201.
+    """
+    summary = (
+        "Backend Developer: tests failed. BLOCKED — "
+        "MCP server `ai-team-repo` failed to connect. "
+        "Tools `mcp__ai_team_repo__write_file_in_scope`, "
+        "`mcp__ai_team_repo__run_shell`, "
+        "`mcp__ai_team_repo__create_branch`, and "
+        "`mcp__ai_team_repo__open_pr` were not available "
+        "after three ToolSearch retries. Role constraints "
+        "prohibit falling back to native Bash/Write/Edit."
+    )
+    out = maybe_route_mcp_race_to_blocked(_failed_report(summary))
+    assert isinstance(out.payload, TaskReportPayload)
+    assert out.payload.status == TaskStatus.BLOCKED
+    assert out.payload.blocked_on == "mcp_unhealthy"
+    # Summary preserved verbatim — owner needs the LLM's
+    # original wording for diagnosis.
+    assert out.payload.summary == summary
+
+
+def test_cross_product_does_not_match_unrelated_failures() -> None:
+    """Sanity: an AssertionError summary + a Bash permission-
+    error summary contain NO MCP-token (`MCP server`,
+    `MCP tools`, `mcp__ai_team_repo`) AND NO failure-verb. Both
+    must stay FAILED — the cross-product's near-zero false-
+    positive property has to survive genuine non-MCP failures.
+    """
+    assertion_summary = (
+        "Backend Developer: tests failed. AssertionError "
+        "in test_models.py line 42: expected score==7, "
+        "got 5. Stack trace below."
+    )
+    bash_summary = (
+        "Backend Developer: tests failed. Bash command "
+        "'rm -rf /' was denied by permission sandbox; "
+        "task could not proceed."
+    )
+    for summary in (assertion_summary, bash_summary):
+        out = maybe_route_mcp_race_to_blocked(_failed_report(summary))
+        assert isinstance(out.payload, TaskReportPayload)
+        assert out.payload.status == TaskStatus.FAILED
+        assert out.payload.blocked_on is None
+
+
 def test_leaves_non_task_report_messages_unchanged() -> None:
     """Task assignments, broadcasts, etc. pass through
     untouched even when payload text happens to contain

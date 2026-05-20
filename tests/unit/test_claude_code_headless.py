@@ -426,6 +426,91 @@ async def test_invoke_does_not_misclassify_other_non_zero_as_budget() -> None:
     assert not isinstance(exc_info.value, LLMBudgetExhaustedError)
 
 
+# === iter-15: distinct LLMBudgetExhaustedError on api_error_status=429 ===
+
+
+@pytest.mark.asyncio
+async def test_invoke_routes_429_session_limit_to_budget_exhausted() -> None:
+    """iter-14 run #1 (correlation 7568ee93-2fb5-4a06-b306-
+    e7352f1f7a71) Architect's claude -p exited 1 with stdout carrying
+    api_error_status=429 + "You've hit your session limit · resets ..."
+    This is the Anthropic Max-5x rolling session-window limit, not the
+    iter-6 `error_max_budget_usd` shape. iter-15 routes it to
+    LLMBudgetExhaustedError so the dispatcher emits
+    BLOCKED(blocked_on='budget') — same recovery path as iter-6 — and
+    the iter-14 run #1's $0.59 burn becomes recoverable via
+    retry-blocked once the reset window opens. Pinned from
+    `iter_14_demo_report.md` Run #1."""
+    client = ClaudeCodeHeadlessClient()
+
+    stdout_payload = (
+        b'{"type":"result","subtype":"success","is_error":true,'
+        b'"api_error_status":429,"duration_ms":115347,'
+        b'"num_turns":2,'
+        b'"result":"You\'ve hit your session limit '
+        b'\\u00b7 resets 12:10pm (Europe/Moscow)",'
+        b'"stop_reason":"stop_sequence","session_id":"abc",'
+        b'"total_cost_usd":0.587}'
+    )
+
+    class _FailingProc:
+        returncode = 1
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return stdout_payload, b""
+
+    async def _fake_create(*_cmd: str, **_kwargs: Any) -> _FailingProc:
+        return _FailingProc()
+
+    with (
+        patch(
+            "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=_fake_create),
+        ),
+        pytest.raises(LLMBudgetExhaustedError) as exc_info,
+    ):
+        await client.invoke(system_prompt="sp", user_message="u", model="sonnet")
+
+    # The exception's stringified form contains the verbatim "session
+    # limit" phrase from the claude -p response — useful diagnostic for
+    # the owner reading the synthesized BLOCKED task_report's summary.
+    assert "session limit" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_invoke_429_regression_non_quota_error_still_invocation_error() -> None:
+    """A non-zero exit whose stdout carries `api_error_status` but NOT
+    429 (e.g., 500 internal error) and NO "session limit" text must
+    stay LLMInvocationError. Guards against widening the detector
+    beyond the precise Max-5x session-window shape."""
+    client = ClaudeCodeHeadlessClient()
+
+    class _FailingProc:
+        returncode = 1
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return (
+                b'{"type":"result","subtype":"success","is_error":true,'
+                b'"api_error_status":500,'
+                b'"result":"Internal server error",'
+                b'"session_id":"s"}'
+            ), b""
+
+    async def _fake_create(*_cmd: str, **_kwargs: Any) -> _FailingProc:
+        return _FailingProc()
+
+    with (
+        patch(
+            "core.llm.claude_code_headless.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=_fake_create),
+        ),
+        pytest.raises(LLMInvocationError) as exc_info,
+    ):
+        await client.invoke(system_prompt="sp", user_message="u", model="haiku")
+
+    assert not isinstance(exc_info.value, LLMBudgetExhaustedError)
+
+
 # === iter-7 Phase 2: LLMTimeoutError carries buffered stdout ===
 
 
