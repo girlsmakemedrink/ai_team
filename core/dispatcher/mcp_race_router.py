@@ -37,6 +37,15 @@ verbatim:
                   four distinct phrasings. iter-15 replaces
                   the tuple-of-tuples with a cross-product
                   of two narrow token sets.)
+  - iter-15 demo: Backend retry (correlation efbd0ccc-...)
+                    "MCP tools (ai-team-repo) were unreachable
+                    ... blocked by the same MCP unavailability"
+                  (added iter-16 — two new domain-specific
+                  synonyms of "unavailable". Same cross-product
+                  design; just two more set entries. Note that
+                  "unavailable" is NOT a substring of
+                  "unavailability", so the noun form needs its
+                  own entry.)
 
 This module substring-matches those patterns and rewrites
 to `BLOCKED(blocked_on='mcp_unhealthy')` so dependents stay
@@ -86,6 +95,14 @@ _MCP_FAILURE_VERB_SET: frozenset[str] = frozenset(
         "not available",
         "failed to connect",
         "could not connect",
+        # iter-16: Backend's iter-15 demo retry surfaced two
+        # domain-specific synonyms of "unavailable" the LLM
+        # picked organically. `"unavailable"` is NOT a
+        # substring of `"unavailability"` (position 9 differs:
+        # "le" vs "lity"), so the noun form needs its own
+        # entry. See iter_15_demo_report.md Failure 1.
+        "unreachable",
+        "unavailability",
     }
 )
 
