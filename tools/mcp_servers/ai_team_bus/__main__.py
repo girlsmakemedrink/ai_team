@@ -3,6 +3,11 @@
 Iteration 0 STUB: tools are declared but return placeholder responses.
 Real implementation lands in Iteration 2 with the first agents.
 
+iter-17: added `initialize` handler. Pre-iter-17 this stub silently
+dropped the MCP handshake request (the same bug that affected the
+production `ai_team_repo` server). See
+`docs/iterations/iter_17.md`.
+
 Exposes (planned):
 - mcp__ai_team_bus__publish_message(message: AgentMessage)
 - mcp__ai_team_bus__read_team_feed(filters: dict)
@@ -20,6 +25,10 @@ from typing import Any
 # runnable without that dependency installed yet. Iteration 2 wires the
 # real MCP SDK in. The shape below mimics the JSON-RPC handshake that
 # `claude -p --mcp-config` performs so the stub registers cleanly.
+
+_SERVER_NAME = "ai_team_bus"
+_SERVER_VERSION = "0.1.0"
+_DEFAULT_PROTOCOL_VERSION = "2025-06-18"
 
 
 _TOOL_LIST: list[dict[str, Any]] = [
@@ -41,6 +50,60 @@ _TOOL_LIST: list[dict[str, Any]] = [
 ]
 
 
+def _build_response(msg: dict[str, Any]) -> dict[str, Any] | None:
+    """Build the JSON-RPC response for one client message.
+
+    Returns None for notifications (no id) and unknown methods —
+    the loop translates that into "do not write to stdout".
+    Stub `tools/call` returns a placeholder text response sync.
+    See `tools/mcp_servers/ai_team_repo/__main__.py` for the
+    iter-17 rationale.
+    """
+    method = msg.get("method")
+    msg_id = msg.get("id")
+
+    if method == "initialize":
+        params = msg.get("params") or {}
+        client_version = params.get("protocolVersion") or _DEFAULT_PROTOCOL_VERSION
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {
+                "protocolVersion": client_version,
+                "capabilities": {"tools": {}},
+                "serverInfo": {
+                    "name": _SERVER_NAME,
+                    "version": _SERVER_VERSION,
+                },
+            },
+        }
+
+    if method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {"tools": _TOOL_LIST},
+        }
+
+    if method == "tools/call":
+        tool = (msg.get("params") or {}).get("name", "")
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"[stub] {tool} not implemented until Iteration 2",
+                    }
+                ],
+                "isError": False,
+            },
+        }
+
+    return None
+
+
 async def _stdio_loop() -> None:  # pragma: no cover - integration tested separately
     loop = asyncio.get_event_loop()
     reader = asyncio.StreamReader()
@@ -54,40 +117,11 @@ async def _stdio_loop() -> None:  # pragma: no cover - integration tested separa
             msg = json.loads(line.decode())
         except json.JSONDecodeError:
             continue
-        method = msg.get("method")
-        if method == "tools/list":
-            sys.stdout.write(
-                json.dumps(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": msg.get("id"),
-                        "result": {"tools": _TOOL_LIST},
-                    }
-                )
-                + "\n"
-            )
-            sys.stdout.flush()
-        elif method == "tools/call":
-            tool = msg.get("params", {}).get("name", "")
-            sys.stdout.write(
-                json.dumps(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": msg.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"[stub] {tool} not implemented until Iteration 2",
-                                }
-                            ],
-                            "isError": False,
-                        },
-                    }
-                )
-                + "\n"
-            )
-            sys.stdout.flush()
+        response = _build_response(msg)
+        if response is None:
+            continue
+        sys.stdout.write(json.dumps(response) + "\n")
+        sys.stdout.flush()
 
 
 def main() -> None:  # pragma: no cover

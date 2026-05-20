@@ -4,6 +4,14 @@ Wired the same way as `ai_team_bus` / `ai_team_tasks`: no `mcp` package
 dependency, hand-rolled stdio loop, so it stays runnable from a fresh
 `uv run` without extra installs. Handlers live in `handlers.py`.
 
+iter-17: added `initialize` handler. Pre-iter-17 this loop only
+handled `tools/list` + `tools/call` — claude -p's REQUIRED MCP
+handshake (`initialize` first per spec) silently dropped. claude
+marked the server as "still connecting" → ToolSearch retries → all
+the "still-connecting" / "never connected" / "unreachable" /
+"unavailable" symptoms iter-9..16 routed correctly to BLOCKED but
+never fixed the root cause. See `docs/iterations/iter_17.md`.
+
 Tools surface (per ADR-004's path-scoped repo ops):
 
 - status()                              → {branch, is_dirty, modified, untracked_files}
@@ -22,6 +30,10 @@ import sys
 from typing import Any
 
 from tools.mcp_servers.ai_team_repo.handlers import HANDLERS, Context
+
+_SERVER_NAME = "ai_team_repo"
+_SERVER_VERSION = "0.1.0"
+_DEFAULT_PROTOCOL_VERSION = "2025-06-18"
 
 TOOL_LIST: list[dict[str, Any]] = [
     {
@@ -118,6 +130,54 @@ TOOL_LIST: list[dict[str, Any]] = [
 ]
 
 
+def _build_response(msg: dict[str, Any]) -> dict[str, Any] | None:
+    """Build the JSON-RPC response for a single client message.
+
+    Returns None when the message is a notification (no id), an
+    unknown method, or `tools/call` (which dispatches to async
+    handlers with `Context` and is handled directly in the stdio
+    loop). The loop translates None into "do not write anything
+    to stdout".
+
+    Why this is extracted as a pure function: pre-iter-17 the
+    stdio loop was untestable end-to-end (only subprocess tests
+    could exercise it) and the lack of an `initialize` handler
+    went unnoticed for 14 iterations. Extracting builds a
+    direct-callable surface so the unit-test layer can pin every
+    method response shape against MCP spec.
+    """
+    method = msg.get("method")
+    msg_id = msg.get("id")
+
+    if method == "initialize":
+        params = msg.get("params") or {}
+        client_version = params.get("protocolVersion") or _DEFAULT_PROTOCOL_VERSION
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {
+                "protocolVersion": client_version,
+                "capabilities": {"tools": {}},
+                "serverInfo": {
+                    "name": _SERVER_NAME,
+                    "version": _SERVER_VERSION,
+                },
+            },
+        }
+
+    if method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {"tools": TOOL_LIST},
+        }
+
+    # tools/call dispatches to async handlers with a per-process
+    # Context — handled directly in the stdio loop. Notifications
+    # (no id) and any unknown method also return None.
+    return None
+
+
 async def _stdio_loop() -> None:  # pragma: no cover - smoke-tested via integration
     ctx = Context.from_env()
     loop = asyncio.get_event_loop()
@@ -132,14 +192,17 @@ async def _stdio_loop() -> None:  # pragma: no cover - smoke-tested via integrat
             msg = json.loads(line.decode())
         except json.JSONDecodeError:
             continue
-        method = msg.get("method")
-        msg_id = msg.get("id")
-        if method == "tools/list":
-            sys.stdout.write(
-                json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": {"tools": TOOL_LIST}}) + "\n"
-            )
+
+        # Sync request shapes: initialize, tools/list, unknown.
+        # Notifications (no id) also pass through here as None.
+        response = _build_response(msg)
+        if response is not None:
+            sys.stdout.write(json.dumps(response) + "\n")
             sys.stdout.flush()
-        elif method == "tools/call":
+            continue
+
+        # tools/call dispatches async with Context — kept in the loop.
+        if msg.get("method") == "tools/call":
             params = msg.get("params") or {}
             name = params.get("name", "")
             arguments = params.get("arguments") or {}
@@ -151,7 +214,9 @@ async def _stdio_loop() -> None:  # pragma: no cover - smoke-tested via integrat
                 }
             else:
                 result = await handler(ctx, arguments)
-            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": result}) + "\n")
+            sys.stdout.write(
+                json.dumps({"jsonrpc": "2.0", "id": msg.get("id"), "result": result}) + "\n"
+            )
             sys.stdout.flush()
 
 
