@@ -283,15 +283,21 @@ def test_parse_response_tokens_populated(client: ClaudeCodeHeadlessClient) -> No
     assert resp.duration_ms == 42
 
 
-# === iter-5 Phase 2: --permission-mode acceptEdits ===
+# === iter-17 Phase 2: --permission-mode bypassPermissions ===
 
 
 @pytest.mark.asyncio
-async def test_invoke_passes_permission_mode_accept_edits() -> None:
-    """Adapter passes --permission-mode acceptEdits by default so agent
-    sessions don't stall on the interactive write-approval prompt that
-    blocked Frontend in the iter-4 demo. See iter_4_demo_report.md
-    Failure 2 + iter_5.md Phase 2."""
+async def test_invoke_passes_permission_mode_bypass_permissions() -> None:
+    """Adapter passes --permission-mode bypassPermissions. iter-5 used
+    acceptEdits, but that mode only auto-accepts file edits — MCP tool
+    calls still hit claude's permission gate, which in non-interactive
+    `claude -p` mode has no UI to grant approval. iter-17 demo
+    surfaced this when the MCP handshake fix made tools visible:
+    Backend reported "permission approval not granted" for
+    mcp__ai_team_repo__* calls. The real security boundary lives at
+    the orchestrator layer (per-agent allowed_tools/disallowed_tools,
+    MCP server path scope, run_shell command_class enum), so bypassing
+    claude's permission gate is safe."""
     client = ClaudeCodeHeadlessClient()
     captured_argvs: list[tuple[str, ...]] = []
 
@@ -320,7 +326,9 @@ async def test_invoke_passes_permission_mode_accept_edits() -> None:
     argv = captured_argvs[0]
     assert "--permission-mode" in argv, f"argv missing --permission-mode: {argv}"
     idx = argv.index("--permission-mode")
-    assert argv[idx + 1] == "acceptEdits", f"expected acceptEdits, got {argv[idx + 1]!r}"
+    assert argv[idx + 1] == "bypassPermissions", (
+        f"expected bypassPermissions, got {argv[idx + 1]!r}"
+    )
 
 
 # === iter-5 Phase 4: log + raise stdout on non-zero exit ===
