@@ -179,13 +179,22 @@ class ClaudeCodeHeadlessClient:
             system_prompt,
             "--max-budget-usd",
             f"{effective_budget:.4f}",
-            # iter-5: acceptEdits auto-accepts file edits / tool uses inside
-            # the agent's session so it doesn't stall on the interactive
-            # write-approval prompt that blocked Frontend in iter-4's demo.
-            # Defense-in-depth: dangerous shell commands still gate; per-MCP
-            # path scope is enforced by ai-team-repo's AI_TEAM_PATH_PREFIXES.
+            # iter-17: bypassPermissions. iter-5 chose acceptEdits to avoid
+            # the interactive write-approval prompt; that path auto-accepts
+            # File edits but NOT MCP tool calls. iter-17's MCP handshake fix
+            # made MCP tools visible — and the iter-17 demo immediately
+            # surfaced a NEW symptom: Backend reported "permission approval
+            # not granted" for mcp__ai_team_repo__* tool calls because
+            # `claude -p` in non-interactive mode has no UI to approve.
+            # bypassPermissions skips claude's permission gate entirely; the
+            # real security boundary is the orchestrator's per-agent
+            # allowed_tools + disallowed_tools (Bash explicitly disallowed
+            # for Backend) + the MCP server's enforced path scope
+            # (AI_TEAM_PATH_PREFIXES / AI_TEAM_PATH_DENY_PREFIXES) +
+            # run_shell's command_class enum — none of those depend on
+            # claude's permission mode. See iter_17.md Phase 2 demo report.
             "--permission-mode",
-            "acceptEdits",
+            "bypassPermissions",
         ]
         if allowed_tools:
             cmd += ["--allowed-tools", ",".join(allowed_tools)]
