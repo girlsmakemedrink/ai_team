@@ -156,5 +156,6 @@ class ProductManagerAgent(BaseAgent):
             timeout_s=self.llm_timeout_s,
             max_turns=self.max_turns,
             json_schema=USER_STORIES_SCHEMA,
+            env=self._build_env(msg),
         )
         return self._stamp_metrics(self.build_outputs(response, msg), response)

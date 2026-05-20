@@ -100,12 +100,36 @@ class BaseAgent(ABC):
             )
         user_msg = self._user_message_for(msg)
         response = await self._invoke_with_retries(
+            msg=msg,
             system_prompt=self.system_prompt(),
             user_message=user_msg,
             session_key=str(msg.correlation_id),
         )
         outputs = self.build_outputs(response, msg)
         return self._stamp_metrics(outputs, response)
+
+    # iter-19: per-message env injection so the MCP subprocess
+    # Context.from_env fallback in
+    # tools/mcp_servers/ai_team_tasks/handlers.py populates correctly
+    # when the LLM forgets to pass identity fields in tool args.
+    # iter-18 demo Run #2 hit `requesting_agent='unknown'` because no
+    # agent role was ever set per-call. See
+    # iter_18_demo_report.md Caveat 2.
+    def _build_env(self, msg: AgentMessage) -> dict[str, str]:
+        env: dict[str, str] = {
+            "AI_TEAM_AGENT_ROLE": self.role.value,
+            "AI_TEAM_CORRELATION_ID": str(msg.correlation_id),
+        }
+        # task_id lives on the payload for assignments (and reports),
+        # not on the envelope. Read it defensively — broadcasts and
+        # other shapes may not have one.
+        task_id = getattr(msg.payload, "task_id", None)
+        if task_id is not None:
+            env["AI_TEAM_TASK_ID"] = str(task_id)
+        # Per-class mcp_env wins on key collisions (caller knows best
+        # about role-scoped paths like AI_TEAM_PATH_PREFIXES).
+        env.update(self.mcp_env)
+        return env
 
     @abstractmethod
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
@@ -156,10 +180,12 @@ class BaseAgent(ABC):
     async def _invoke_with_retries(
         self,
         *,
+        msg: AgentMessage,
         system_prompt: str,
         user_message: str,
         session_key: str | None = None,
     ) -> LLMResponse:
+        env = self._build_env(msg)
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(3),
             wait=wait_exponential_jitter(initial=1, max=20),
@@ -176,7 +202,7 @@ class BaseAgent(ABC):
                     session_id=session_key,
                     timeout_s=self.llm_timeout_s,
                     max_turns=self.max_turns,
-                    env=dict(self.mcp_env) if self.mcp_env else None,
+                    env=env,
                 )
         # Unreachable: AsyncRetrying with reraise=True always returns or raises.
         raise RuntimeError("unreachable")
