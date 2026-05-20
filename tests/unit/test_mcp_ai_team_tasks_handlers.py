@@ -165,9 +165,7 @@ async def test_request_human_review_defaults_correlation_id_from_ctx(
         default_agent="qa_engineer",
         default_correlation_id=cid,
     )
-    result = await handle_request_human_review(
-        ctx, {"summary": "x", "agent": "qa_engineer"}
-    )
+    result = await handle_request_human_review(ctx, {"summary": "x", "agent": "qa_engineer"})
     assert result["isError"] is False
     payload = json.loads(result["content"][0]["text"])
     assert payload["correlation_id"] == cid

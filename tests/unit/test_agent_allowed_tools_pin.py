@@ -18,9 +18,10 @@ here at CI time rather than in the next demo run.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
-from agents._base.agent import BaseAgent
 from agents.architect import ArchitectAgent
 from agents.backend_developer import BackendDeveloperAgent
 from agents.designer import DesignerAgent
@@ -31,6 +32,9 @@ from agents.product_manager import ProductManagerAgent
 from agents.qa_engineer import QAEngineerAgent
 from agents.sre_support import SRESupportAgent
 from agents.team_lead import TeamLeadAgent
+
+if TYPE_CHECKING:
+    from agents._base.agent import BaseAgent
 
 # Note: BaseAgent itself keeps `allowed_tools = ()` as the class
 # default — concrete agents must override. The pin below iterates
@@ -68,10 +72,6 @@ def test_pm_and_tl_exclude_request_human_review(
     request_human_review. iter-18 demo run #2 wrote
     a row via PM unprompted; the iter-19 fix forbids
     that path."""
-    assert (
-        "mcp__ai_team_tasks__request_human_review"
-        not in cls.allowed_tools
-    ), (
-        f"{cls.__name__} can still call request_human_review — "
-        f"iter-18 leak not closed"
+    assert "mcp__ai_team_tasks__request_human_review" not in cls.allowed_tools, (
+        f"{cls.__name__} can still call request_human_review — iter-18 leak not closed"
     )

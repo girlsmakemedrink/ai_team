@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 from uuid import uuid4
 
 from agents._base import BaseAgent
@@ -28,9 +28,6 @@ from core.messaging.schemas import (
     Priority,
     TaskAssignmentPayload,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class _RecordingLLM:
@@ -63,9 +60,7 @@ class _DummyAgent(BaseAgent):
     system_prompt_path: ClassVar[Path] = Path("/dev/null")
     allowed_tools: ClassVar[tuple[str, ...]] = ("Read",)
 
-    def build_outputs(
-        self, response: LLMResponse, incoming: AgentMessage
-    ) -> list[AgentMessage]:
+    def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         del response, incoming
         return []
 
