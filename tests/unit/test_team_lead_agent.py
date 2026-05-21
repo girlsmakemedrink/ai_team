@@ -216,6 +216,52 @@ async def test_re_decomposes_on_blocked_task_too_large() -> None:
 
 
 @pytest.mark.asyncio
+async def test_re_decomposes_on_blocked_via_summary_prefix() -> None:
+    """iter-24: primary self-eject signal is the BLOCKED summary's
+    Scope pre-flight prefix. Even when the LLM fills blocked_on with
+    something completely unrelated (e.g. demo R#1's verbose paragraph
+    about untracked directories), TL recognises the prefix and routes
+    via re-decomposition. This is structural — the prompt template
+    forces the LLM to copy "Scope pre-flight:" verbatim.
+    """
+    agent = TeamLeadAgent(llm=_StubLLM())
+    msg = _blocked_report(
+        sender=AgentId.BACKEND_DEVELOPER,
+        blocked_on="examples/ is untracked in worktree-iter-NN and absent from main",
+        summary=(
+            "Scope pre-flight: 3 files / 230 LOC estimated. Echoing "
+            "original task description: Implement the idea-validator core "
+            "pipeline including the data-model layer and the service layer."
+        ),
+    )
+    outputs = await agent.handle(msg)
+    assert len(outputs) == 1
+    assert outputs[0].recipient == AgentId.TEAM_LEAD
+    assert isinstance(outputs[0].payload, TaskAssignmentPayload)
+    assert "re-decompose" in outputs[0].payload.description.lower()
+    assert "idea-validator core" in outputs[0].payload.description
+
+
+@pytest.mark.asyncio
+async def test_blocked_without_scope_prefix_does_not_route_to_re_decomp() -> None:
+    """Inverse: a genuine non-scope BLOCKED (e.g. blocked_on=devops)
+    should NOT trigger the re-decomposition path. TL's normal routing
+    (route to AgentId(blocked_on)) should handle it instead.
+    """
+    agent = TeamLeadAgent(llm=_StubLLM())
+    msg = _blocked_report(
+        sender=AgentId.BACKEND_DEVELOPER,
+        blocked_on="devops",  # legitimate dependency on DevOps work
+        summary="Need CI workflow that runs pytest on the new branch.",
+    )
+    outputs = await agent.handle(msg)
+    # Should route to DevOps (one auto-hop), not self-target re-decomp.
+    assert len(outputs) == 1
+    assert outputs[0].recipient == AgentId.DEVOPS
+    assert outputs[0].sender == AgentId.TEAM_LEAD
+
+
+@pytest.mark.asyncio
 async def test_re_decomposes_on_blocked_with_task_too_large_substring() -> None:
     """iter-23 belt-and-suspenders: even if the schema enum is somehow
     bypassed and Backend emits a verbose blocked_on like
