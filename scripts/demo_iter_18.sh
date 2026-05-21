@@ -209,6 +209,13 @@ else
 fi
 
 step "6.6/7 — Auto-approve any pending_reviews (close the loop)"
+# WARNING (added in iter-21): the `echo "$JSON" | python3 <<'PY'` /
+# `printf '%s' "$JSON" | python3 <<'PY'` pattern below is a
+# heredoc-vs-pipe conflict. python's stdin gets the heredoc
+# (source code), not the piped JSON. Fixed in
+# scripts/demo_iter_21.sh by switching to `python3 - "$JSON"
+# <<'PY' ... sys.argv[1]`. Do NOT copy this pattern into new
+# demo scripts. See docs/iterations/iter_21.md Phase 3.
 REVIEWS_JSON=$(curl -sf -H "Authorization: Bearer $OWNER_TOKEN" \
     http://127.0.0.1:8000/api/reviews 2>/dev/null || echo '[]')
 echo "$REVIEWS_JSON" | python3 <<'PY' || true

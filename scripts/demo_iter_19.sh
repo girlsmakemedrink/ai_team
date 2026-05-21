@@ -233,6 +233,13 @@ step "6.6/7 — Auto-approve any pending_reviews (close the loop)"
 # failure via `|| true`), then `${VAR:-[]}` to guarantee non-empty
 # input to python. `printf '%s'` avoids `echo`'s leading-hyphen /
 # backslash-interpretation quirks on some platforms.
+# WARNING (added in iter-21): both the iter-18 fix (echo fallback)
+# and the iter-19 fix below (${VAR:-[]} + printf) patched the wrong
+# layer. The real bug is `printf '%s' "$JSON" | python3 <<'PY'` —
+# bash routes python's stdin to the HEREDOC source code, not the
+# piped JSON. Fixed in scripts/demo_iter_21.sh via `python3 -
+# "$JSON" <<'PY' ... sys.argv[1]`. Do NOT copy this pattern into
+# new demo scripts. See docs/iterations/iter_21.md Phase 3.
 REVIEWS_JSON=$(curl -sf -H "Authorization: Bearer $OWNER_TOKEN" \
     http://127.0.0.1:8000/api/reviews 2>/dev/null || true)
 REVIEWS_JSON="${REVIEWS_JSON:-[]}"

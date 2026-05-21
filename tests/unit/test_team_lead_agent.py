@@ -181,6 +181,62 @@ async def test_skips_non_blocked_task_reports() -> None:
     assert outputs == []
 
 
+# === iter-21: BLOCKED(task_too_large) → TL self-targeted re-decomp ===
+
+
+@pytest.mark.asyncio
+async def test_re_decomposes_on_blocked_task_too_large() -> None:
+    """When Backend's iter-21 tripwire fires, TL emits a self-targeted
+    task_assignment carrying the original description (echoed in the
+    BLOCKED summary) and a re-decompose instruction."""
+    agent = TeamLeadAgent(llm=_StubLLM())
+    msg = _blocked_report(
+        sender=AgentId.BACKEND_DEVELOPER,
+        blocked_on="task_too_large",
+        summary=(
+            "task too large: description 1800 chars > 1500 threshold\n\n"
+            "original task description (first 800 chars):\n"
+            "Implement the idea-validator pipeline including the "
+            "data-model layer, the service layer, and the API surface."
+        ),
+    )
+
+    outputs = await agent.handle(msg)
+
+    assert len(outputs) == 1
+    out = outputs[0]
+    assert out.sender == AgentId.TEAM_LEAD
+    assert out.recipient == AgentId.TEAM_LEAD
+    assert out.message_type == MessageType.TASK_ASSIGNMENT
+    assert isinstance(out.payload, TaskAssignmentPayload)
+    assert _AUTO_ROUTED_MARKER in out.payload.description
+    assert "re-decompose" in out.payload.description.lower()
+    assert "idea-validator pipeline" in out.payload.description
+    assert out.correlation_id == msg.correlation_id
+
+
+@pytest.mark.asyncio
+async def test_anti_loop_refuses_second_re_decomp_on_already_routed_marker() -> None:
+    """Anti-loop guard: if the BLOCKED summary already carries the
+    'auto-routed already' marker (Backend's tripwire echoes it when
+    the incoming task description already had the auto-route marker),
+    TL refuses a second re-decomp hop."""
+    agent = TeamLeadAgent(llm=_StubLLM())
+    msg = _blocked_report(
+        sender=AgentId.BACKEND_DEVELOPER,
+        blocked_on="task_too_large",
+        summary=(
+            "[auto-routed already] task too large: 1700 chars > 1500 threshold\n\n"
+            "original task description (first 800 chars):\n"
+            "second re-decomp attempt should refuse."
+        ),
+    )
+
+    outputs = await agent.handle(msg)
+
+    assert outputs == []
+
+
 # === depends_on / metadata stamping (iter-3 Phase 2) ===
 
 

@@ -12,11 +12,13 @@ tools, structured-response unpacking, failure paths.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 
 from agents.backend_developer import BackendDeveloperAgent
+from agents.backend_developer.agent import _is_task_too_large
 from core.llm.base import LLMResponse, TokensUsage
 from core.messaging.schemas import (
     AgentId,
@@ -25,7 +27,11 @@ from core.messaging.schemas import (
     Priority,
     TaskAssignmentPayload,
     TaskReportPayload,
+    TaskStatus,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _StubLLM:
@@ -184,3 +190,93 @@ async def test_handle_skips_non_task_assignment() -> None:
         payload={"kind": "question", "question_id": str(uuid4()), "text": "hi"},
     )
     assert await agent.handle(other) == []
+
+
+# ---------- iter-21 tripwire tests ----------
+#
+# Backend pre-flight rejects too-large task_assignments BEFORE invoking
+# the LLM (and burning 600s on doomed work). See iter_21.md Phase 1.
+
+
+def _tripwire_assignment(description: str) -> AgentMessage:
+    return AgentMessage(
+        correlation_id=uuid4(),
+        sender=AgentId.TEAM_LEAD,
+        recipient=AgentId.BACKEND_DEVELOPER,
+        message_type=MessageType.TASK_ASSIGNMENT,
+        priority=Priority.P1,
+        payload=TaskAssignmentPayload(
+            task_id=uuid4(),
+            title="tripwire probe",
+            description=description,
+        ),
+    )
+
+
+def test_is_task_too_large_fires_on_long_description(tmp_path: Path) -> None:
+    description = "create core/foo.py and tests/unit/test_foo.py\n\n" + ("x" * 1600)
+    too_large, diag = _is_task_too_large(description, tmp_path)
+    assert too_large is True
+    assert "1500" in diag or "chars" in diag.lower()
+
+
+def test_is_task_too_large_fires_on_three_unknown_file_paths(tmp_path: Path) -> None:
+    description = (
+        "Implement the data-model layer.\n\n"
+        "Write core/foo/alpha.py, core/foo/beta.py, "
+        "and tests/unit/test_foo_alpha.py."
+    )
+    too_large, diag = _is_task_too_large(description, tmp_path)
+    assert too_large is True
+    assert "file" in diag.lower() or "path" in diag.lower()
+
+
+def test_is_task_too_large_does_not_fire_on_small_task(tmp_path: Path) -> None:
+    (tmp_path / "core").mkdir()
+    (tmp_path / "core" / "existing.py").write_text("# stub")
+    description = "Edit core/existing.py to add the validate() helper."
+    too_large, diag = _is_task_too_large(description, tmp_path)
+    assert too_large is False, diag
+
+
+@pytest.mark.asyncio
+async def test_handle_emits_blocked_with_task_too_large_on_long_description(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("AI_TEAM_REPO_ROOT", str(tmp_path))
+    stub = _StubLLM(_backend_response())
+    agent = BackendDeveloperAgent(llm=stub)
+    msg = _tripwire_assignment("x" * 1700)
+
+    outputs = await agent.handle(msg)
+
+    assert stub.calls == [], "LLM must not be invoked on tripwire reject"
+    assert len(outputs) == 1
+    report = outputs[0]
+    assert report.sender == AgentId.BACKEND_DEVELOPER
+    assert report.recipient == AgentId.TEAM_LEAD
+    assert report.message_type == MessageType.TASK_REPORT
+    assert isinstance(report.payload, TaskReportPayload)
+    assert report.payload.status == TaskStatus.BLOCKED
+    assert report.payload.blocked_on == "task_too_large"
+    assert "task too large" in report.payload.summary.lower()
+
+
+@pytest.mark.asyncio
+async def test_handle_blocked_summary_echoes_auto_route_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("AI_TEAM_REPO_ROOT", str(tmp_path))
+    stub = _StubLLM(_backend_response())
+    agent = BackendDeveloperAgent(llm=stub)
+    msg = _tripwire_assignment(
+        "[auto-routed from team_lead] re-decompose this work.\n\n" + ("x" * 1600)
+    )
+
+    outputs = await agent.handle(msg)
+
+    assert stub.calls == []
+    assert len(outputs) == 1
+    report = outputs[0]
+    assert isinstance(report.payload, TaskReportPayload)
+    assert "auto-routed already" in report.payload.summary.lower()
