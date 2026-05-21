@@ -12,6 +12,7 @@ tools, structured-response unpacking, failure paths.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -209,14 +210,14 @@ def _tripwire_assignment(description: str) -> AgentMessage:
     )
 
 
-def test_is_task_too_large_fires_on_long_description(tmp_path) -> None:
+def test_is_task_too_large_fires_on_long_description(tmp_path: Path) -> None:
     description = "create core/foo.py and tests/unit/test_foo.py\n\n" + ("x" * 1600)
     too_large, diag = _is_task_too_large(description, tmp_path)
     assert too_large is True
     assert "1500" in diag or "chars" in diag.lower()
 
 
-def test_is_task_too_large_fires_on_three_unknown_file_paths(tmp_path) -> None:
+def test_is_task_too_large_fires_on_three_unknown_file_paths(tmp_path: Path) -> None:
     description = (
         "Implement the data-model layer.\n\n"
         "Write core/foo/alpha.py, core/foo/beta.py, "
@@ -227,7 +228,7 @@ def test_is_task_too_large_fires_on_three_unknown_file_paths(tmp_path) -> None:
     assert "file" in diag.lower() or "path" in diag.lower()
 
 
-def test_is_task_too_large_does_not_fire_on_small_task(tmp_path) -> None:
+def test_is_task_too_large_does_not_fire_on_small_task(tmp_path: Path) -> None:
     (tmp_path / "core").mkdir()
     (tmp_path / "core" / "existing.py").write_text("# stub")
     description = "Edit core/existing.py to add the validate() helper."
@@ -237,7 +238,7 @@ def test_is_task_too_large_does_not_fire_on_small_task(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_emits_blocked_with_task_too_large_on_long_description(
-    monkeypatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("AI_TEAM_REPO_ROOT", str(tmp_path))
     stub = _StubLLM(_backend_response())
@@ -259,7 +260,9 @@ async def test_handle_emits_blocked_with_task_too_large_on_long_description(
 
 
 @pytest.mark.asyncio
-async def test_handle_blocked_summary_echoes_auto_route_marker(monkeypatch, tmp_path) -> None:
+async def test_handle_blocked_summary_echoes_auto_route_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("AI_TEAM_REPO_ROOT", str(tmp_path))
     stub = _StubLLM(_backend_response())
     agent = BackendDeveloperAgent(llm=stub)
