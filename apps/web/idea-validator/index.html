@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>idea-validator &#x2014; stress-test your product idea from the CLI</title>
+  <meta name="description" content="Turn a product idea into a structured viability report &#x2014; competitors, market size, risks, differentiators, and a 1&#x2013;10 score. No sign-up required.">
+  <style>
+    :root {
+      --accent:    #4A90D9;
+      --success:   #27AE60;
+      --warning:   #F39C12;
+      --error:     #E74C3C;
+      --neutral:   #2C3E50;
+      --font-mono: 'SFMono-Regular','Consolas','Liberation Mono','Menlo',monospace;
+      --font-sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body   { font-family: var(--font-sans); color: var(--neutral); background: #fff; line-height: 1.6; min-width: 320px; }
+    a      { color: var(--accent); text-decoration: none; }
+    a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+    .wrap  { max-width: 720px; margin: 0 auto; padding: 0 1.5rem; }
+    h1     { font-size: 2.25rem; font-weight: 700; letter-spacing: -0.5px; }
+    h2     { font-size: 1.5rem; font-weight: 600; }
+
+    header { border-bottom: 1px solid rgba(44,62,80,0.12); padding: 1rem 0; }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; }
+    .brand { font-family: var(--font-mono); font-weight: 700; font-size: 0.9rem; color: var(--accent); }
+    .cta   { display: inline-block; background: var(--accent); color: #fff; padding: 0.5rem 1.1rem; border-radius: 6px; font-weight: 600; font-size: 0.9rem; }
+    .cta:hover { opacity: 0.88; color: #fff; }
+
+    .hero  { padding: 3rem 0 2rem; }
+    .hero-sub { max-width: 560px; margin: 1rem 0 1.5rem; color: rgba(44,62,80,0.7); }
+    .cmd   { background: rgba(44,62,80,0.05); border: 1px solid rgba(44,62,80,0.12); border-radius: 6px; padding: 1rem 1.25rem; font-family: var(--font-mono); font-size: 0.875rem; white-space: pre; overflow-x: auto; color: var(--neutral); margin-bottom: 1.5rem; }
+
+    .features { padding: 2rem 0; background: rgba(44,62,80,0.03); border-top: 1px solid rgba(44,62,80,0.1); border-bottom: 1px solid rgba(44,62,80,0.1); }
+    .features h2 { margin-bottom: 1rem; }
+    .features-grid { display: flex; flex-wrap: wrap; gap: 1rem; }
+    .feature-card  { flex: 1 1 180px; padding: 1rem; background: #fff; border: 1px solid rgba(44,62,80,0.12); border-radius: 6px; }
+    .feature-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.4rem; color: var(--accent); }
+    .feature-card p  { font-size: 0.875rem; color: rgba(44,62,80,0.7); }
+
+    .sample { padding: 2rem 0; }
+    .sample-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .score-cell  { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .score-label { font-size: 0.7rem; font-family: var(--font-mono); color: rgba(44,62,80,0.6); text-transform: uppercase; letter-spacing: 0.05em; }
+    .badge       { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 50%; background: var(--success); font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700; color: #fff; }
+    .badge--warning { background: var(--warning); color: #1a1a1a; }
+    .badge--error   { background: var(--error); }
+    .badge--empty   { background: rgba(44,62,80,0.4); font-size: 0.875rem; }
+    pre.report { background: rgba(44,62,80,0.05); color: var(--neutral); font-family: var(--font-mono); font-size: 0.875rem; line-height: 1.6; overflow-x: auto; max-height: 480px; overflow-y: auto; border-radius: 0 6px 6px 0; padding: 1.25rem; white-space: pre; border-left: 3px solid var(--accent); }
+
+    .install { padding: 2rem 0; border-top: 1px solid rgba(44,62,80,0.1); }
+    .install h2 { margin-bottom: 0.75rem; }
+    .install-note { font-size: 0.9rem; color: rgba(44,62,80,0.7); margin-bottom: 1rem; }
+    code { font-family: var(--font-mono); font-size: 0.875rem; color: var(--accent); }
+
+    footer { padding: 1.5rem 0; text-align: center; font-size: 0.75rem; color: rgba(44,62,80,0.6); border-top: 1px solid rgba(44,62,80,0.1); }
+
+    @media (max-width: 640px) {
+      h1 { font-size: 1.75rem; }
+      .feature-card { flex: 1 1 100%; }
+      pre.report { max-height: 320px; font-size: 0.8rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header role="banner">
+  <div class="wrap nav-inner">
+    <span class="brand">idea-validator</span>
+    <a class="cta" href="../../../examples/sandbox/idea-validator/README.md" aria-label="Install the idea-validator CLI">Get started &#x2192;</a>
+  </div>
+</header>
+
+<main>
+  <!-- NO FORM — STATIC PAGE ONLY.
+       ADR-0011 §No-backend-handshake prohibits POST /analyze for this surface.
+       PRD US-4 AC-6 bans <form>, mailto:, and third-party embeds.
+       The CLI command <pre class="cmd"> below IS the "input display".
+       TODO (v3): wire to a POST /analyze API endpoint once a backend server is in scope.
+
+       STATES — all managed by scripts/refresh_sample.sh at build time (not by JS):
+         Normal:  <pre class="report"> contains HTML-escaped sample/report.md
+                  <span class="badge"> contains score integer; class drives bg color
+         Empty:   Replace <span class="badge">7</span> with
+                    <span class="badge badge--empty">&#x2014;</span>
+                  Replace <pre class="report"> content with:
+                    "Sample not yet generated. Run scripts/refresh_sample.sh
+                     after the first `idea-validator analyze` run."
+         Error:   Verbatim report.md from a partial-failure run (exit 1) — no markup change.
+                  Score badge reads actual score (missing-stage components set to 0).
+         Loading: N/A — static file://, no JS, no async fetch. -->
+
+  <section class="hero" aria-labelledby="hero-heading">
+    <div class="wrap">
+      <h1 id="hero-heading">Stress-test your product idea in seconds.</h1>
+      <p class="hero-sub">Competitors &#xB7; market estimate &#xB7; risks &#xB7; differentiators &#xB7; viability score &#x2014; no sign-up, no form, just your terminal.</p>
+      <pre class="cmd" aria-label="Example CLI command">$ idea-validator analyze --idea "AI tutoring marketplace" \
+  --depth standard --output-dir ./reports</pre>
+      <a class="cta" href="../../../examples/sandbox/idea-validator/README.md">Get started &#x2192;</a>
+    </div>
+  </section>
+
+  <section class="features" aria-labelledby="features-heading">
+    <div class="wrap">
+      <h2 id="features-heading">What you get</h2>
+      <div class="features-grid" role="list">
+        <article class="feature-card" role="listitem">
+          <h3>Competitors</h3>
+          <p>3&#x2013;5 entries with URL and positioning &#x2014; sourced from web search.</p>
+        </article>
+        <article class="feature-card" role="listitem">
+          <h3>Market estimate</h3>
+          <p>TAM, SAM, and SOM in USD with LLM-backed reasoning.</p>
+        </article>
+        <article class="feature-card" role="listitem">
+          <h3>Risks &amp; differentiators</h3>
+          <p>Top 3 risks ranked by severity &#xB7; top 3 differentiators.</p>
+        </article>
+        <article class="feature-card" role="listitem">
+          <h3>Viability score</h3>
+          <p>1&#x2013;10 score with per-component breakdown and rationale.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="sample" aria-labelledby="sample-heading">
+    <div class="wrap">
+      <div class="sample-header">
+        <h2 id="sample-heading">Sample output</h2>
+        <div class="score-cell" aria-label="Viability score: 7 out of 10">
+          <span class="score-label">Viability</span>
+          <!-- badge class driven by sample/score.json#/score (refreshed by scripts/refresh_sample.sh):
+               score &#x2265; 7  &#x2192; .badge                 (--success bg)
+               score 4&#x2013;6  &#x2192; .badge.badge--warning   (--warning bg, text #1a1a1a)
+               score &#x2264; 3  &#x2192; .badge.badge--error     (--error bg)
+               absent     &#x2192; .badge.badge--empty     (--neutral 40% bg, shows "&#x2014;") -->
+          <span class="badge">7</span>
+        </div>
+      </div>
+      <!-- verbatim content of examples/sandbox/idea-validator/sample/report.md
+           regenerated by scripts/refresh_sample.sh; HTML-special chars escaped -->
+      <pre class="report" tabindex="0" role="region" aria-label="Sample validation report for AI tutoring marketplace"># Idea Validation Report
+
+**Idea:** AI tutoring marketplace
+
+**Viability Score: 7/10**
+
+Market=5/5, Competition=2/5, Risk=2/5, Differentiation=5/5 &#x2192; raw=14 &#x2192; score=7/10
+
+## Competitors
+
+- **Coursera - Online Courses** (https://coursera.org): Online learning marketplace with AI recommendations
+- **Wyzant - Tutor Marketplace** (https://wyzant.com): Connect with expert tutors for personalised learning
+- **Chegg Tutors** (https://chegg.com): On-demand tutoring and homework help
+- **Preply - Language Tutoring** (https://preply.com): AI-matched tutors for language learning
+- **Superprof - Tutor Network** (https://superprof.com): Largest network of tutors worldwide
+
+## Market Estimate
+
+- TAM: $50,000,000,000
+- SAM: $5,000,000,000
+- SOM: $100,000,000
+
+The global tutoring and supplemental education market is large and growing, driven by demand
+for personalised learning and rising adoption of AI. TAM includes all online education spend;
+SAM focuses on marketplace-style tutor platforms; SOM reflects a realistic 2% capture in the
+first 3 years.
+
+## Top Risks
+
+- [HIGH] **Regulatory compliance**: EdTech regulations vary widely by jurisdiction;
+  data-privacy rules (COPPA, GDPR) add compliance burden for student data.
+- [MEDIUM] **Tutor supply quality**: Onboarding and vetting quality tutors at scale is
+  operationally hard; low quality erodes trust quickly.
+- [LOW] **Student churn after goal completion**: Students may cancel once they achieve their
+  learning goal, limiting lifetime value.
+
+## Key Differentiators
+
+- **AI-powered tutor matching**: Proprietary matching algorithm reduces search friction and
+  improves first-session satisfaction versus manual filtering.
+- **Verified tutor credentials**: Background checks and credential verification build parent
+  and student trust, differentiating from peer-to-peer platforms.
+- **Progress tracking dashboard**: Data-driven learning plans with session analytics help
+  students stay on track and give parents visibility.
+
+## Files
+
+- [input.json](input.json)
+- [competitors.json](competitors.json)
+- [market.md](market.md)
+- [risks.md](risks.md)
+- [differentiators.md](differentiators.md)
+- [score.json](score.json)</pre>
+    </div>
+  </section>
+
+  <section class="install" aria-labelledby="install-heading">
+    <div class="wrap">
+      <h2 id="install-heading">Get started</h2>
+      <p class="install-note">Install from <code>examples/sandbox/idea-validator</code> &#x2014; no sign-up, no API key required for quick mode.</p>
+      <a href="../../../examples/sandbox/idea-validator/README.md" aria-label="View full install guide in README">Read the install guide &#x2192;</a>
+    </div>
+  </section>
+
+</main>
+
+<footer role="contentinfo">
+  <div class="wrap">
+    idea-validator &#xB7; ai_team
+  </div>
+</footer>
+
+</body>
+</html>
