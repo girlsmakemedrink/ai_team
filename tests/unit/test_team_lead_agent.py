@@ -215,6 +215,20 @@ async def test_re_decomposes_on_blocked_task_too_large() -> None:
     assert out.correlation_id == msg.correlation_id
 
 
+def test_tl_prompt_teaches_mandatory_architect_backend_depends_on() -> None:
+    """iter-22 Phase 2: when both architect and backend_developer are
+    in the same decomposition, Backend MUST depends_on Architect."""
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[2] / "prompts" / "team_lead.md").read_text()
+    # Pin substrings from the new rule:
+    assert "Architect" in text and "Backend" in text
+    assert "MUST" in text
+    assert "depends_on" in text
+    # The rule must be conditional ("when both roles co-occur"):
+    assert "co-occur" in text.lower() or "both" in text.lower()
+
+
 @pytest.mark.asyncio
 async def test_anti_loop_refuses_second_re_decomp_on_already_routed_marker() -> None:
     """Anti-loop guard: if the BLOCKED summary already carries the

@@ -88,14 +88,22 @@ BACKEND_REPORT_SCHEMA: dict[str, object] = {
     "required": ["branch", "summary", "files_written", "tests_passed", "pr_url"],
     "additionalProperties": False,
     "properties": {
+        # iter-22: allow empty branch when the LLM self-ejects on scope.
         "branch": {
             "type": "string",
-            "pattern": r"^agent/backend_developer/[a-zA-Z0-9._\-/]+$",
+            "pattern": r"^(agent/backend_developer/[a-zA-Z0-9._\-/]+)?$",
         },
         "summary": {"type": "string", "minLength": 1, "maxLength": 2_000},
         "files_written": {"type": "array", "items": {"type": "string"}},
         "tests_passed": {"type": "boolean"},
         "pr_url": {"type": "string"},
+        # iter-22: optional LLM self-eject path. When status='blocked',
+        # build_outputs emits a BLOCKED task_report with blocked_on
+        # forwarded; the other fields can be empty/defaults. See
+        # docs/iterations/iter_22.md Phase 1 and the "Scope pre-flight"
+        # section in prompts/backend_developer.md.
+        "status": {"type": "string", "enum": ["done", "failed", "blocked"]},
+        "blocked_on": {"type": ["string", "null"]},
     },
 }
 
@@ -144,7 +152,42 @@ class BackendDeveloperAgent(BaseAgent):
             return []
 
         report = response.structured
-        if not report or "tests_passed" not in report:
+        if not report:
+            return [
+                self._report_to_tl(
+                    incoming,
+                    status=TaskStatus.FAILED,
+                    summary="Backend Developer: LLM did not return a parseable task_report",
+                    artifacts=[],
+                )
+            ]
+
+        # iter-22: honor explicit `status` from the LLM (self-eject path).
+        # When the Scope pre-flight in the prompt triggers, the LLM
+        # emits status='blocked' on turn 1; TL's re-decomp handler
+        # (iter-21) recovers automatically.
+        explicit_status = str(report.get("status", "") or "").lower()
+        if explicit_status == "blocked":
+            blocked_on = str(report.get("blocked_on") or "task_too_large")
+            summary = str(report.get("summary", "")).strip()
+            if not summary:
+                summary = "Backend self-eject: scope too large"
+            self._log.info(
+                "backend.llm_self_eject_blocked",
+                blocked_on=blocked_on,
+                correlation_id=str(incoming.correlation_id),
+            )
+            return [
+                self._report_to_tl(
+                    incoming,
+                    status=TaskStatus.BLOCKED,
+                    summary=summary[:2_000],
+                    artifacts=[],
+                    blocked_on=blocked_on,
+                )
+            ]
+
+        if "tests_passed" not in report:
             return [
                 self._report_to_tl(
                     incoming,

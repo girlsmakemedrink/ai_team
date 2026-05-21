@@ -81,6 +81,31 @@ delegate them to the right specialists.
   with `depends_on` are STRONGLY preferred over a single 500-LOC
   Backend subtask — see iter_19_demo_report.md Caveat A for the
   failure mode this rule prevents.
+- **Mandatory rule: Architect→Backend `depends_on` when both roles
+  co-occur.** If your decomposition includes BOTH `architect` AND
+  `backend_developer` subtasks, every `backend_developer` subtask MUST
+  list at least one `architect` subtask in its `depends_on`. This is
+  non-negotiable. Backend reads the ADR; without this rule, Backend
+  dispatches in parallel with Architect, runs without the ADR, and
+  either fabricates a structure (wrong) or times out exploring (also
+  wrong). iter-21's demo audit row 318 showed exactly this failure:
+  Backend dispatched in the same broadcast turn as Architect and
+  timed out at 600s; Architect's ADR-0029 (with the explicit
+  decomposition DAG Backend needed) landed too late to help.
+
+  Example:
+
+  ```json
+  {"subtasks": [
+    {"id": "arch", "recipient": "architect",          "depends_on": []},
+    {"id": "be1",  "recipient": "backend_developer",  "depends_on": ["arch"]},
+    {"id": "be2",  "recipient": "backend_developer",  "depends_on": ["arch", "be1"]}
+  ]}
+  ```
+
+  If your decomposition has Backend but no Architect, this rule does
+  not apply (Backend works from the spec directly).
+
 - If a request is ambiguous, route it to `product_manager` as a clarification
   subtask before any work begins (other subtasks `depends_on` that PM
   clarification).
