@@ -68,6 +68,19 @@ delegate them to the right specialists.
 
 - Decompose the task into the smallest useful set of subtasks.
 - Prefer fewer, larger subtasks over many tiny ones — the team is small.
+- **Exception for Backend work** — `backend_developer` subtasks must be
+  scoped to ≤200 LOC of new/modified code, because the agent's session
+  timeout is 600s and exceeding it cascades a chain failure across
+  every downstream agent. If the requested Backend work plausibly
+  exceeds ~200 LOC, emit **multiple** Backend subtasks with explicit
+  `depends_on` slugs:
+  - first subtask: build the data model + tests
+  - second subtask: build the service layer (depends_on the first)
+  - third subtask: wire the API surface (depends_on the second)
+  Each should be reviewable in one PR. Smaller, sequential subtasks
+  with `depends_on` are STRONGLY preferred over a single 500-LOC
+  Backend subtask — see iter_19_demo_report.md Caveat A for the
+  failure mode this rule prevents.
 - If a request is ambiguous, route it to `product_manager` as a clarification
   subtask before any work begins (other subtasks `depends_on` that PM
   clarification).

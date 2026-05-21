@@ -13,7 +13,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tools.mcp_servers.ai_team_repo.commands import (
     CommandRejected,
@@ -22,9 +22,33 @@ from tools.mcp_servers.ai_team_repo.commands import (
 )
 from tools.mcp_servers.ai_team_repo.scope import ScopeConfig, ScopeError, resolve_in_scope
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 _BRANCH_ALLOWED_RE = re.compile(r"^agent/[a-z0-9_]+/[a-zA-Z0-9._\-/]+$")
 _DEFAULT_FORBID_BRANCH_RE = re.compile(r"^(main|master|release/.*)$")
 _RUN_SHELL_OUTPUT_LIMIT = 8000  # bytes per stdout/stderr returned; truncate beyond
+
+# iter-20: module-level state for the per-session "active worktree" —
+# the directory `handle_create_branch` created. Subsequent handler
+# calls in the same MCP server process use this as cwd. Naturally
+# scoped to ONE agent's session because claude -p spawns a fresh MCP
+# server subprocess per invocation — the variable's lifetime IS the
+# agent's session. See iter_19_demo_report.md Caveat B + iter_20.md
+# Phase 1 for the design rationale.
+_ACTIVE_WORKTREE: Path | None = None
+
+
+def _slugify_branch(branch: str) -> str:
+    """Filesystem-safe directory name from a branch ref.
+    `agent/backend_developer/foo-bar` → `agent_backend_developer_foo-bar`."""
+    return branch.replace("/", "_")
+
+
+def _effective_cwd(ctx: Context) -> Path:
+    """The cwd subsequent subprocess calls should use: the active
+    agent worktree if create_branch has run, else the scope root."""
+    return _ACTIVE_WORKTREE if _ACTIVE_WORKTREE is not None else ctx.scope.root
 
 
 @dataclass(slots=True, frozen=True)
@@ -76,7 +100,7 @@ async def handle_status(  # pragma: no cover  - subprocess-driven; integration-t
         "--branch",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=str(ctx.scope.root),
+        cwd=str(_effective_cwd(ctx)),
     )
     out, err = await proc.communicate()
     if proc.returncode != 0:
@@ -104,18 +128,27 @@ async def handle_status(  # pragma: no cover  - subprocess-driven; integration-t
     )
 
 
-async def handle_create_branch(  # pragma: no cover  - subprocess-driven; integration-tested
-    ctx: Context, args: dict[str, Any]
-) -> dict[str, Any]:
+async def handle_create_branch(ctx: Context, args: dict[str, Any]) -> dict[str, Any]:
+    """iter-20: creates the branch in an ISOLATED worktree under
+    <scope_root>/.claude/agent-worktrees/<slug>/ instead of running
+    `git checkout -b` in the shared orchestrator tree (which switched
+    the orchestrator's HEAD mid-chain in iter-19 demo — see
+    iter_19_demo_report.md Caveat B). Subsequent handler calls in the
+    same MCP server process use the isolated worktree as cwd via the
+    module-level `_ACTIVE_WORKTREE`."""
+    global _ACTIVE_WORKTREE  # noqa: PLW0603 - per-MCP-server-process active worktree
     branch = str(args.get("branch", ""))
     base = str(args.get("base") or ctx.default_pr_base)
     if not _BRANCH_ALLOWED_RE.match(branch):
         return _err(f"branch {branch!r} not allowed; must match agent/<role>/<slug>")
     if ctx.forbid_branch_re.match(branch):
         return _err(f"branch {branch!r} is forbidden by AI_TEAM_FORBID_BRANCH_RE")
+    worktree_path = ctx.scope.root / ".claude" / "agent-worktrees" / _slugify_branch(branch)
     proc = await asyncio.create_subprocess_exec(
         "git",
-        "checkout",
+        "worktree",
+        "add",
+        str(worktree_path),
         "-b",
         branch,
         base,
@@ -125,8 +158,16 @@ async def handle_create_branch(  # pragma: no cover  - subprocess-driven; integr
     )
     _, err = await proc.communicate()
     if proc.returncode != 0:
-        return _err(f"git checkout -b failed: {err.decode(errors='replace')[:500]}")
-    return _ok({"branch": branch, "base": base, "created": True})
+        return _err(f"git worktree add failed: {err.decode(errors='replace')[:500]}")
+    _ACTIVE_WORKTREE = worktree_path
+    return _ok(
+        {
+            "branch": branch,
+            "base": base,
+            "created": True,
+            "worktree_path": str(worktree_path),
+        }
+    )
 
 
 async def handle_write_file_in_scope(ctx: Context, args: dict[str, Any]) -> dict[str, Any]:
@@ -141,6 +182,14 @@ async def handle_write_file_in_scope(ctx: Context, args: dict[str, Any]) -> dict
         resolved = resolve_in_scope(ctx.scope, path)
     except ScopeError as e:
         return _err(f"scope rejected: {e}")
+    # iter-20: when an isolated worktree is active, rebase the
+    # resolved (scope-validated) path into the worktree so writes
+    # land there instead of the orchestrator's tree. Scope checks
+    # still run against ctx.scope.root for path safety.
+    effective_root = _effective_cwd(ctx)
+    if effective_root != ctx.scope.root:
+        relative = resolved.relative_to(ctx.scope.root)
+        resolved = effective_root / relative
     if mode == "create" and resolved.exists():
         return _err(f"file exists and mode=create: {path}")
     resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +212,7 @@ async def handle_run_shell(  # pragma: no cover  - subprocess-driven; integratio
         *argv,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=str(ctx.scope.root),
+        cwd=str(_effective_cwd(ctx)),
     )
     out, err = await proc.communicate()
     return _ok(
@@ -205,7 +254,7 @@ async def handle_open_pr(  # pragma: no cover  - subprocess-driven; integration-
         body,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=str(ctx.scope.root),
+        cwd=str(_effective_cwd(ctx)),
     )
     out, err = await proc.communicate()
     if proc.returncode != 0:
