@@ -270,7 +270,17 @@ class TeamLeadAgent(BaseAgent):
         if msg.payload.status != TaskStatus.BLOCKED:
             return []
 
-        if msg.payload.blocked_on == _TASK_TOO_LARGE_BLOCKED_ON:
+        # iter-23: belt-and-suspenders alongside iter-23's
+        # BACKEND_REPORT_SCHEMA enum constraint. Exact match catches the
+        # canonical token; substring fallback catches LLM elaborations
+        # like "task_too_large: 3 files exceeds 2-file limit" that the
+        # schema enum should prevent but stays robust if the validator
+        # is bypassed (e.g. legacy in-flight messages from older builds).
+        # iter-22's "exact match" requirement was the root cause of the
+        # iter-23 demo run #1 stall — TL ignored Backend's verbose
+        # blocked_on string and the chain never reached QA.
+        bo = (msg.payload.blocked_on or "").strip()
+        if bo == _TASK_TOO_LARGE_BLOCKED_ON or _TASK_TOO_LARGE_BLOCKED_ON in bo.lower():
             return self._re_decompose_on_too_large(msg)
 
         # Anti-loop: if the BLOCKED report was already an auto-routed

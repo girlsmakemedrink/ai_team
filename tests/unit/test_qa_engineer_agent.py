@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import pytest
 
 from agents.qa_engineer import QAEngineerAgent
-from core.llm.base import LLMResponse, TokensUsage
+from core.llm.base import LLMResponse, TokensUsage, ToolUse
 from core.messaging.schemas import (
     AgentId,
     AgentMessage,
@@ -17,6 +18,10 @@ from core.messaging.schemas import (
     TaskAssignmentPayload,
     TaskReportPayload,
 )
+from core.persistence.models import PendingReview
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 class _StubLLM:
@@ -161,3 +166,141 @@ async def test_handle_skips_non_task_assignment() -> None:
         payload={"kind": "question", "question_id": str(uuid4()), "text": "hi"},
     )
     assert await agent.handle(other) == []
+
+
+# ---------------------------------------------------------------------------
+# iter-23 Phase 2: Python safety net for the request_human_review tool-call.
+#
+# Phase 1 evidence (tests/integration/test_qa_request_human_review_real_llm.py,
+# 0/3 runs): QA's LLM produces valid schema-conformant JSON but does NOT
+# invoke mcp__ai_team_tasks__request_human_review under --json-schema
+# pressure. The pending_reviews row never lands → 4-iteration QA blocker.
+#
+# Safety net: in QAEngineerAgent.handle(), after the LLM turn, inspect
+# response.tools_used. If the required MCP tool name is absent, INSERT
+# the pending_reviews row directly via an injected session_factory.
+# Mirror of iter-18's handler INSERT shape; avoids a layer-violating
+# import from tools.mcp_servers into agents/.
+# ---------------------------------------------------------------------------
+
+
+class _FakeSession:
+    """Minimal async-session stand-in that records .add() calls."""
+
+    def __init__(self, recorder: list[Any]) -> None:
+        self._recorder = recorder
+
+    async def __aenter__(self) -> _FakeSession:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    def add(self, obj: object) -> None:
+        self._recorder.append(obj)
+
+    async def commit(self) -> None:
+        return None
+
+    async def refresh(self, _obj: object) -> None:
+        return None
+
+
+class _FakeSessionFactory:
+    def __init__(self) -> None:
+        self.added: list[Any] = []
+
+    def __call__(self) -> _FakeSession:
+        return _FakeSession(self.added)
+
+
+def _qa_response_with_tools(tool_names: list[str]) -> LLMResponse:
+    """Like `_qa_response()` but with non-empty tools_used."""
+    return LLMResponse(
+        text=json.dumps({"suite_passed": True}),
+        structured={
+            "suite_passed": True,
+            "tests_run": 42,
+            "tests_failed": 0,
+            "coverage_pct": 87.5,
+            "failures": [],
+            "summary": "All tests pass with 87.5% coverage.",
+        },
+        tools_used=[ToolUse(name=n, input={}) for n in tool_names],
+        session_id="qa-sess",
+        tokens=TokensUsage(input=80, output=100, model="claude-sonnet-4-6"),
+        cost_estimate_cents=4,
+        duration_ms=1500,
+        validated_against_schema=True,
+        raw={},
+    )
+
+
+@pytest.mark.asyncio
+async def test_safety_net_inserts_when_tool_use_missing() -> None:
+    """No tool-call in response → safety net INSERTs the row directly."""
+    factory = _FakeSessionFactory()
+    typed_factory = cast("async_sessionmaker[AsyncSession]", factory)
+    agent = QAEngineerAgent(llm=_StubLLM(_qa_response()), session_factory=typed_factory)
+    msg = _task_assignment()
+
+    outputs = await agent.handle(msg)
+
+    assert len(outputs) == 1
+    assert len(factory.added) == 1
+    row = factory.added[0]
+    assert isinstance(row, PendingReview)
+    assert row.correlation_id == msg.correlation_id
+    assert row.requesting_agent == "qa_engineer"
+    assert row.task_id == msg.payload.task_id  # type: ignore[union-attr]
+    assert row.summary  # non-empty
+
+
+@pytest.mark.asyncio
+async def test_safety_net_skipped_when_tool_use_present() -> None:
+    """Tool-call already in response → safety net does NOT INSERT."""
+    factory = _FakeSessionFactory()
+    resp = _qa_response_with_tools(["mcp__ai_team_tasks__request_human_review"])
+    typed_factory = cast("async_sessionmaker[AsyncSession]", factory)
+    agent = QAEngineerAgent(llm=_StubLLM(resp), session_factory=typed_factory)
+
+    outputs = await agent.handle(_task_assignment())
+
+    assert len(outputs) == 1
+    assert factory.added == [], "Safety net must skip when LLM called the tool itself"
+
+
+@pytest.mark.asyncio
+async def test_safety_net_skipped_when_no_session_factory() -> None:
+    """No factory injected (unit-test path) → loud-and-skip, no exception."""
+    agent = QAEngineerAgent(llm=_StubLLM(_qa_response()), session_factory=None)
+    # Should not raise.
+    outputs = await agent.handle(_task_assignment())
+    assert len(outputs) == 1
+    payload = outputs[0].payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status.value == "done"
+
+
+@pytest.mark.asyncio
+async def test_safety_net_inserts_on_failed_suite_too() -> None:
+    """LLM reported suite_passed=False → safety net still INSERTs.
+
+    QA prompt (`prompts/qa_engineer.md:62-66`):
+    > `request_human_review` is REQUIRED on every QA run, even when
+    > the suite passes.
+
+    The owner-approval gate is load-bearing on every QA turn —
+    failures need a row so the owner sees them in the queue too.
+    """
+    factory = _FakeSessionFactory()
+    failing = _qa_response(suite_passed=False, failures=["t.py::tcase"])
+    typed_factory = cast("async_sessionmaker[AsyncSession]", factory)
+    agent = QAEngineerAgent(llm=_StubLLM(failing), session_factory=typed_factory)
+
+    await agent.handle(_task_assignment())
+
+    assert len(factory.added) == 1
+    row = factory.added[0]
+    assert isinstance(row, PendingReview)
+    assert row.requesting_agent == "qa_engineer"

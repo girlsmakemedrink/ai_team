@@ -31,7 +31,16 @@ if TYPE_CHECKING:
     from uuid import UUID
 
 
-RECOVERABLE_BLOCKED_ON: frozenset[str] = frozenset({"mcp_unhealthy", "budget"})
+RECOVERABLE_BLOCKED_ON: frozenset[str] = frozenset(
+    {
+        "mcp_unhealthy",
+        "budget",
+        # iter-23: TL auto-re-decomposes task_too_large (iter-21 Phase 2
+        # handler), but the owner-side `ai-team retry-blocked` CLI must
+        # also accept it. iter-22 demo Caveat C surfaced the misleading 422.
+        "task_too_large",
+    }
+)
 RETRY_ATTEMPT_CAP: int = 5
 
 

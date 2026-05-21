@@ -102,6 +102,18 @@ BACKEND_REPORT_SCHEMA: dict[str, object] = {
         # forwarded; the other fields can be empty/defaults. See
         # docs/iterations/iter_22.md Phase 1 and the "Scope pre-flight"
         # section in prompts/backend_developer.md.
+        #
+        # iter-23 demo run #1 (correlation 6e294dad) Caveat: LLM emitted
+        # blocked_on as a verbose free-form sentence (~200 chars)
+        # describing the scope problem instead of the canonical token,
+        # which broke TL's exact-match routing. iter-23 hot-fix tried
+        # an enum constraint here, but demo run #2 (correlation c941d96a)
+        # showed Backend's claude -p subprocess exhausting its $2.50
+        # budget cap (dispatcher-synth BLOCKED(budget) rows 369/371) —
+        # most likely cause: --json-schema validation retry-loop when
+        # the LLM kept producing free-form blocked_on strings. Enum
+        # reverted; TL substring matcher + prompt-side literal-token
+        # instruction carry the routing defense instead.
         "status": {"type": "string", "enum": ["done", "failed", "blocked"]},
         "blocked_on": {"type": ["string", "null"]},
     },

@@ -3,6 +3,19 @@
 Per ADR-001 / ADR-004 / ADR-006. Like Backend, the Python class is thin:
 it sets system prompt + JSON-schema, the LLM does the actual work via
 mcp__ai_team_repo__run_shell(pytest).
+
+iter-23 Phase 2: adds a Python-side safety net for the
+`request_human_review` MCP tool-call. Phase 1 evidence (0/3 runs in
+tests/integration/test_qa_request_human_review_real_llm.py) showed
+the LLM produces schema-valid QA JSON but does NOT invoke the tool
+under --json-schema pressure. Without a backstop, the
+`pending_reviews` row — the owner-approval gate — never lands, which
+broke the chain in iter-19→22 (4-iter deferred criterion). Safety
+net inspects `response.tools_used`; if the MCP tool name is absent,
+the agent INSERTs the row directly via an injected session_factory.
+Mirror of `tools/mcp_servers/ai_team_tasks/handlers.py:handle_request_human_review`
+INSERT shape; deliberately a direct DB write (not an import from
+tools/) to keep agents/ → tools/ layer separation clean.
 """
 
 from __future__ import annotations
@@ -21,9 +34,12 @@ from core.messaging.schemas import (
     TaskReportPayload,
     TaskStatus,
 )
+from core.persistence.models import PendingReview
 
 if TYPE_CHECKING:
-    from core.llm.base import LLMResponse
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from core.llm.base import LLMClient, LLMResponse
 
 _log = structlog.get_logger(__name__)
 
@@ -43,6 +59,9 @@ QA_REPORT_SCHEMA: dict[str, object] = {
         "summary": {"type": "string", "minLength": 1, "maxLength": 2_000},
     },
 }
+
+
+_REQUEST_HUMAN_REVIEW_TOOL = "mcp__ai_team_tasks__request_human_review"
 
 
 class QAEngineerAgent(BaseAgent):
@@ -66,6 +85,19 @@ class QAEngineerAgent(BaseAgent):
     }
     llm_timeout_s: ClassVar[int] = 300
     max_turns: ClassVar[int] = 15
+
+    def __init__(
+        self,
+        *,
+        llm: LLMClient,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
+    ) -> None:
+        # iter-23 Phase 2: session_factory plumbed by the dispatcher
+        # (apps/api/main.py); None in unit-test paths that mock the LLM
+        # but don't need a DB. Safety net degrades to log-and-skip when
+        # absent.
+        super().__init__(llm=llm)
+        self._session_factory = session_factory
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if not isinstance(incoming.payload, TaskAssignmentPayload):
@@ -115,7 +147,62 @@ class QAEngineerAgent(BaseAgent):
             json_schema=QA_REPORT_SCHEMA,
             env=dict(self.mcp_env) if self.mcp_env else None,
         )
-        return self._stamp_metrics(self.build_outputs(response, msg), response)
+        outputs = self._stamp_metrics(self.build_outputs(response, msg), response)
+        await self._ensure_pending_review_row(response, msg)
+        return outputs
+
+    async def _ensure_pending_review_row(
+        self, response: LLMResponse, incoming: AgentMessage
+    ) -> None:
+        """Safety net: write pending_reviews row if LLM forgot to call the tool.
+
+        Phase 1 evidence (iter-23, 0/3 runs) shows the LLM produces
+        valid schema-conformant JSON but skips
+        `mcp__ai_team_tasks__request_human_review` under
+        `--json-schema` pressure. Without this backstop the
+        owner-approval gate never opens and the QA chain doesn't close.
+        """
+        tool_names = {t.name for t in response.tools_used}
+        if _REQUEST_HUMAN_REVIEW_TOOL in tool_names:
+            return
+
+        report = response.structured or {}
+        summary = str(report.get("summary") or "QA verdict (Python safety net)").strip()
+        if not summary:
+            summary = "QA verdict (Python safety net)"
+
+        if self._session_factory is None:
+            _log.warning(
+                "qa.safety_net.no_session_factory",
+                correlation_id=str(incoming.correlation_id),
+                summary_preview=summary[:80],
+            )
+            return
+
+        assert isinstance(incoming.payload, TaskAssignmentPayload)
+        try:
+            async with self._session_factory() as session:
+                review = PendingReview(
+                    correlation_id=incoming.correlation_id,
+                    requesting_agent="qa_engineer",
+                    task_id=incoming.payload.task_id,
+                    summary=summary[:2_000],
+                )
+                session.add(review)
+                await session.commit()
+            _log.warning(
+                "qa.safety_net.row_inserted",
+                correlation_id=str(incoming.correlation_id),
+                task_id=str(incoming.payload.task_id),
+                reason="llm_skipped_request_human_review_tool",
+            )
+        except Exception:
+            # Never silently swallow; log and continue so the
+            # task_report still surfaces the QA verdict.
+            _log.exception(
+                "qa.safety_net.insert_failed",
+                correlation_id=str(incoming.correlation_id),
+            )
 
     def _report_to_tl(
         self,

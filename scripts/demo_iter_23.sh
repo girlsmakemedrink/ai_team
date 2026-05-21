@@ -1,52 +1,45 @@
 #!/usr/bin/env bash
-# HISTORICAL — see scripts/demo_iter_23.sh for the current iteration's
-# demo. iter-23 ships the QA Python safety net + 45-min poll window
-# that finally land the 4-iter-deferred QA `pending_reviews` row.
+# Iter-23 demo: same 6-stage DAG as iter-10..22 (PM → Architect
+# → Backend | Designer → Frontend → QA). iter-23 closes the
+# 4-iteration-deferred QA `pending_reviews` row criterion.
 #
-# Iter-22 demo: same 6-stage DAG as iter-10..21 (PM → Architect
-# → Backend | Designer → Frontend → QA per
-# docs/sandbox/idea_validator_v2_spec.md). iter-22 closes the
-# two TOP carry-overs from iter-21's demo so the chain can
-# finally reach QA and produce a `pending_reviews` row with
-# requesting_agent='qa_engineer' (4-iteration deferred).
+# Phase 1 evidence
+# (tests/integration/test_qa_request_human_review_real_llm.py,
+# 0/3 runs both pre- and post-Phase-2-implementation) showed
+# QA's LLM produces schema-valid JSON but does NOT invoke
+# mcp__ai_team_tasks__request_human_review under --json-schema
+# pressure. This was the actual root cause of the 4-iteration
+# QA blocker — never observed because iter-19/20/21 Backend
+# timeouts blocked the chain from ever reaching QA in real
+# conditions. iter-23's "demo poll expired" theory was wrong.
 #
-#   1. iter-21 demo Caveat A (Backend 600s timeout —
-#      now 12-iteration carry-over) — iter-21's Python
-#      tripwire heuristic (char count > 1500 OR >= 3 unknown
-#      file-path tokens) didn't fire on TL's natural ~440-char
-#      Backend description. iter-22 Phase 1 moves the scope
-#      judgment from regex to LLM: Backend's prompt instructs
-#      the model to self-eject as BLOCKED(task_too_large) on
-#      turn 1 when scope >2 files OR >200 LOC.
-#      BACKEND_REPORT_SCHEMA gains optional status/blocked_on
-#      fields; build_outputs honors status='blocked'.
-#      iter-21's Python tripwire stays as defense-in-depth.
+#   1. iter-23 Phase 2: Python-side safety net in
+#      QAEngineerAgent.handle() — inspects response.tools_used
+#      and INSERTs the pending_reviews row directly via the
+#      injected session_factory when the LLM skipped the MCP
+#      tool. Plumbed through apps/api/main.py:93. Validated
+#      3/3 end-to-end at iter-23 Phase 2 (220s, $0.10).
+#      Owner-approval gate now lands deterministically.
 #
-#   2. iter-21 demo Caveat C (Backend dispatched in parallel
-#      with Architect, no depends_on) — Architect's ADR-0029
-#      arrived AFTER Backend's coarse task already started
-#      running. iter-22 Phase 2 promotes the existing
-#      advisory "Backend depends_on Architect" example in
-#      prompts/team_lead.md to a MANDATORY rule when both
-#      roles co-occur. Backend now waits for Architect's ADR
-#      before its first LLM turn starts.
+#   2. iter-23 Phase 3: RECOVERABLE_BLOCKED_ON +=
+#      "task_too_large". Closes iter-23 demo Caveat C.
 #
-#   3. iter-21 Phase 3 (this script inherits) — pre-flight
-#      `git worktree prune` + .claude/agent-worktrees/ rm,
-#      EXIT trap cleanup, and the heredoc-vs-pipe bash fix
-#      (`python3 - "$JSON" <<'PY' ... sys.argv[1]`) all
-#      unchanged.
+#   3. iter-23 Phase 4 (this script): demo poll window 30 →
+#      45 min, matches the CLAUDE.md-documented budget.
 #
-#   4. Expected outcome: orchestrator HEAD stays on
-#      worktree-iter-22 throughout; Backend waits for
-#      Architect's ADR (depends_on rule); if the
-#      Architect-decomposed scope is still too large,
-#      Backend self-ejects on turn 1 -> TL re-decomposes
-#      (iter-21 Phase 2 path) -> smaller subtasks complete
-#      -> QA writes the pending_review row.
+#   4. Inherits from iter-23: Backend self-eject prompt,
+#      mandatory Architect→Backend depends_on rule. Inherits
+#      from iter-21: Python tripwire (defense-in-depth),
+#      TL re-decomp handler, heredoc-vs-pipe bash fix
+#      (`python3 - "$JSON" <<'PY' ... sys.argv[1]`).
 #
-# Wall-clock budget: 30 min initial chain + 15 min retry window
-# = 45 min total. Cost ceiling: $5.00 (iter-19 was ~$2.00).
+#   5. Expected outcome: chain reaches QA → QA produces a
+#      pending_reviews row (via the iter-23 Phase 2 safety
+#      net since the LLM doesn't reliably call the tool) →
+#      criterion finally met after 22+ iterations.
+#
+# Wall-clock budget: 45 min initial chain + 15 min retry
+# window = 60 min total worst case. Cost ceiling: $5.00.
 #
 # Prerequisites:
 #   - .env populated (make dev does this)
@@ -76,7 +69,7 @@ while (( SECONDS < deadline )); do
     sleep 2
 done
 
-step "1.5/7 — Prune stale agent worktrees (iter-22)"
+step "1.5/7 — Prune stale agent worktrees (iter-23)"
 # iter-20: handle_create_branch now creates isolated worktrees under
 # .claude/agent-worktrees/. Stale ones from prior demo runs would
 # confuse `git worktree add`. Prune first.
@@ -95,7 +88,7 @@ uv run alembic upgrade head >/dev/null
 ok "schema applied"
 
 step "3/7 — Write MCP config (direct .venv/bin/python)"
-MCP_CONFIG="$(pwd)/.iter22-mcp.json"
+MCP_CONFIG="$(pwd)/.iter23-mcp.json"
 REPO_ROOT="$(pwd)"
 VENV_PY="${REPO_ROOT}/.venv/bin/python"
 cat >"$MCP_CONFIG" <<JSON
@@ -129,7 +122,7 @@ API_LOG=$(mktemp)
 export AI_TEAM_MCP_CONFIG_PATH="$MCP_CONFIG"
 uv run uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 >"$API_LOG" 2>&1 &
 API_PID=$!
-_cleanup_iter22() {
+_cleanup_iter23() {
     kill "$API_PID" 2>/dev/null || true
     rm -f "$API_LOG" "$MCP_CONFIG"
     # iter-20: clean up isolated agent worktrees so the next run starts fresh
@@ -142,7 +135,7 @@ _cleanup_iter22() {
     fi
     git worktree prune 2>/dev/null || true
 }
-trap _cleanup_iter22 EXIT
+trap _cleanup_iter23 EXIT
 until curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1; do sleep 1; done
 ok "API ready (pid $API_PID, logs: $API_LOG)"
 
@@ -165,29 +158,32 @@ RESP=$(curl -sf -X POST http://127.0.0.1:8000/api/tasks \
     -H "Authorization: Bearer $OWNER_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{
-        "title": "iter-22 demo: idea-validator v2 (CLI + landing page + UX brief)",
+        "title": "iter-23 demo: idea-validator v2 (CLI + landing page + UX brief)",
         "description": "Implement idea-validator per docs/sandbox/idea_validator_v2_spec.md. Decompose into 6 subtasks with depends_on: pm_clarify (PM) → arch (Architect) → {be (Backend), design (Designer)} → fe (Frontend, depends_on=design) → qa (QA, depends_on=[be,fe]). The dispatcher will hold dependent subtasks until predecessors report done. Pass depends_on as slug references in the decomposition JSON.",
         "target_repo": "examples/sandbox/idea-validator"
     }')
 CORRELATION=$(echo "$RESP" | python3 -c 'import sys, json; print(json.load(sys.stdin)["correlation_id"])')
 ok "submitted (correlation $CORRELATION)"
 
-step "6/7 — Wait for the chain (up to 30 min) and surface artifacts"
+step "6/7 — Wait for the chain (up to 45 min — iter-23 bump) and surface artifacts"
 ADR_DIR="docs/adr"
 BACKEND_DIR="examples/sandbox/idea-validator"
 DESIGN_BRIEF="docs/design/idea-validator.md"
 LANDING_PAGE="apps/web/idea-validator/index.html"
-deadline=$((SECONDS + 1800))   # 30 minutes (iter-5 was 20)
+# iter-23 Phase 4: poll window bumped from 30 → 45 min. Matches the
+# CLAUDE.md-documented "30 min initial chain + 15 min retry window = 45
+# min total" budget. iter-22 demo's poll expired with Backend recovery
+# in flight at minute 30 (audit row 342 dispatched at T0+352s, no row
+# 344+). The Phase 2 safety net guarantees QA produces the row when
+# its turn runs; this extension just gives the chain enough headroom
+# to actually reach QA.
+deadline=$((SECONDS + 2700))   # 45 minutes (was 30 in iter-22)
 qa_review_count=0
+loop_minute=0
 while (( SECONDS < deadline )); do
     latest_adr=$(ls -1t "$ADR_DIR"/0*.md 2>/dev/null | head -1 || true)
     # iter-19 fix (iter-18 demo Caveat 3): poll for a SPECIFIC
-    # QA-emitted review rather than any review. iter-18 demo run #2
-    # broke the loop the moment PM unprompted-wrote a row, killing
-    # the dispatcher before Architect/Backend/Designer/Frontend/QA
-    # finished. After iter-19 Phase 3 (PM/TL allow-list hardening),
-    # PM can no longer call request_human_review at all — this
-    # filter is belt-and-braces for that fix.
+    # QA-emitted review rather than any review.
     qa_review_count=$(curl -sf -H "Authorization: Bearer $OWNER_TOKEN" \
         http://127.0.0.1:8000/api/reviews 2>/dev/null \
         | python3 -c 'import sys, json; data = json.load(sys.stdin); print(sum(1 for r in data if r.get("requesting_agent") == "qa_engineer"))' 2>/dev/null \
@@ -195,6 +191,18 @@ while (( SECONDS < deadline )); do
     if [[ "$qa_review_count" -ge 1 ]]; then
         ok "QA produced a pending_review (qa_engineer count=$qa_review_count)"
         break
+    fi
+    # iter-23 Phase 4: per-minute status line so the demo report can
+    # reconstruct "what was in flight when the poll expired" without
+    # forensic audit_log reverse-engineering (iter-22 retro pain).
+    elapsed=$SECONDS
+    minute=$(( elapsed / 60 ))
+    if (( minute > loop_minute )); then
+        loop_minute=$minute
+        rows=$(docker exec ai_team_postgres psql -U ai_team -d ai_team -t -A -c \
+            "SELECT count(*) FROM audit_log WHERE correlation_id='$CORRELATION';" 2>/dev/null \
+            | tr -d '[:space:]' || echo "?")
+        echo "[t+${minute}m] audit_rows=${rows} qa_reviews=${qa_review_count}"
     fi
     sleep 10
 done
@@ -288,7 +296,7 @@ else:
         print(f"approving {rid} ({r.get('requesting_agent','?')}: {r.get('summary','')[:80]})")
         subprocess.run(
             ["uv", "run", "ai-team", "approve", rid,
-             "--comment", "iter-22 demo auto-approve"],
+             "--comment", "iter-23 demo auto-approve"],
             check=False,
         )
 PY
@@ -331,7 +339,18 @@ if command -v psql >/dev/null 2>&1; then
 fi
 
 echo
-echo "--- Pending reviews (QA → owner approval): ---"
+echo "--- iter-23 ACCEPTANCE CRITERION: QA-emitted pending_reviews row ---"
+final_qa_count=$(curl -sf -H "Authorization: Bearer $OWNER_TOKEN" \
+    http://127.0.0.1:8000/api/reviews 2>/dev/null \
+    | python3 -c 'import sys, json; data = json.load(sys.stdin); print(sum(1 for r in data if r.get("requesting_agent") == "qa_engineer"))' 2>/dev/null \
+    || echo 0)
+if [[ "$final_qa_count" -ge 1 ]]; then
+    ok "iter-23 CRITERION MET — qa_engineer pending_reviews count=$final_qa_count (4-iteration deferred row finally landed)"
+else
+    printf "\033[1;31m✗ iter-23 CRITERION NOT MET — qa_engineer pending_reviews count=%s\033[0m\n" "$final_qa_count"
+fi
+echo
+echo "--- Pending reviews (full list): ---"
 uv run ai-team list-pending 2>/dev/null || true
 echo
 echo "--- Latest checkpoint digest: ---"

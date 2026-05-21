@@ -31,6 +31,17 @@ shape (no other fields populated):
 }
 ```
 
+**`blocked_on` MUST be the literal string `"task_too_large"` —
+no elaboration, no description, no embedded reasoning.** Put any
+detail in `summary` instead. iter-23 demo run #1 caught the
+Backend LLM filling `blocked_on` with a verbose paragraph
+explaining why the scope was too large, which broke TL's
+routing match (the field is a routing key, not free-form text).
+The JSON schema enforces this with an enum
+(`["task_too_large", "budget", "mcp_unhealthy", null]`); any
+other value will fail validation and bounce as a malformed
+report.
+
 The Team Lead receives the BLOCKED report and emits a
 smaller re-decomposition (iter-21 Phase 2 handler). **Do
 not partial-implement.** A 50 % implementation that

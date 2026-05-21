@@ -367,3 +367,45 @@ def test_backend_prompt_teaches_scope_preflight() -> None:
         or "more than 2 files" in text.lower()
         or "2 files" in text
     )
+
+
+def test_backend_schema_blocked_on_permissive_string_or_null() -> None:
+    """iter-23: BACKEND_REPORT_SCHEMA's blocked_on is `string | null`.
+
+    Originally (iter-23 hot-fix attempt #1) constrained to an enum,
+    but demo run #2 showed Backend's claude -p subprocess exhausting
+    its $2.50 budget cap on what looked like a --json-schema retry
+    loop. Reverted to permissive type; the routing defense lives in
+    TL's substring matcher + the Backend prompt's literal-token
+    instruction.
+    """
+    from agents.backend_developer.agent import BACKEND_REPORT_SCHEMA
+
+    props = BACKEND_REPORT_SCHEMA["properties"]
+    assert isinstance(props, dict)
+    blocked_on_prop = props["blocked_on"]
+    assert isinstance(blocked_on_prop, dict)
+    assert blocked_on_prop.get("type") == ["string", "null"]
+    # No enum: enum constraint suspected of causing budget burns in
+    # iter-23 demo run #2 (correlation c941d96a-b9ee-4575-aeb6-812f297dd8e8).
+    assert "enum" not in blocked_on_prop
+
+
+def test_backend_prompt_mandates_literal_blocked_on_token() -> None:
+    """iter-23: the prompt must instruct the LLM to use the literal
+    `task_too_large` string for the blocked_on field — no
+    paraphrasing, no description. Demo run #1 LLM produced
+    "tests can't be collected... exceeding the 2-file scope limit"
+    which TL ignored. Pin the literal-token instruction so future
+    prompt edits don't quietly drop it."""
+    prompt_path = _REPO_ROOT_FOR_PROMPT / "prompts" / "backend_developer.md"
+    text = prompt_path.read_text().lower()
+    # Some phrasing that conveys "use the literal canonical token".
+    assert any(
+        marker in text
+        for marker in [
+            "must be the literal",
+            'literal string `"task_too_large"`',
+            "no elaboration",
+        ]
+    ), "Backend prompt must mandate literal task_too_large for blocked_on"

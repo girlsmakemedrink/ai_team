@@ -90,7 +90,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         AgentId.PRODUCT_MANAGER: ProductManagerAgent(llm=llm),
         AgentId.ARCHITECT: ArchitectAgent(llm=llm),
         AgentId.BACKEND_DEVELOPER: BackendDeveloperAgent(llm=llm),
-        AgentId.QA_ENGINEER: QAEngineerAgent(llm=llm),
+        AgentId.QA_ENGINEER: QAEngineerAgent(llm=llm, session_factory=session_factory),
         AgentId.DESIGNER: DesignerAgent(llm=llm),
         AgentId.DEVOPS: DevOpsAgent(llm=llm),
         AgentId.FRONTEND_DEVELOPER: FrontendDeveloperAgent(llm=llm),
