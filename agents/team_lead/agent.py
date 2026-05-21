@@ -38,6 +38,12 @@ _log = structlog.get_logger(__name__)
 # same chain surface in the digest for the owner.
 _AUTO_ROUTED_MARKER = "auto-routed"
 _BLOCKED_SUMMARY_RE = re.compile(r"blocked:\s*requires\s+(\w+)", re.IGNORECASE)
+# iter-21: special blocked_on value emitted by Backend's runtime
+# tripwire. Triggers a TL self-targeted re-decomposition turn instead
+# of the usual "route to AgentId(blocked_on)" path (task_too_large is
+# not a valid AgentId). See docs/iterations/iter_21.md Phase 2.
+_TASK_TOO_LARGE_BLOCKED_ON = "task_too_large"
+_ALREADY_ROUTED_MARKER = "auto-routed already"
 
 
 # Per-subtask slug pattern, also reused for depends_on references.
@@ -254,11 +260,18 @@ class TeamLeadAgent(BaseAgent):
         Pure dispatch — no LLM call. Saves an Opus turn on every routing
         hop. Returns an empty list when there's nothing to do (the owner
         sees the BLOCKED report in the digest as before).
+
+        iter-21: blocked_on='task_too_large' is a special case — TL
+        re-decomposes the original Backend work via a self-targeted
+        task_assignment. See _re_decompose_on_too_large.
         """
         if not isinstance(msg.payload, TaskReportPayload):
             return []
         if msg.payload.status != TaskStatus.BLOCKED:
             return []
+
+        if msg.payload.blocked_on == _TASK_TOO_LARGE_BLOCKED_ON:
+            return self._re_decompose_on_too_large(msg)
 
         # Anti-loop: if the BLOCKED report was already an auto-routed
         # follow-up, refuse to re-route a second time. The chain stops
@@ -297,6 +310,56 @@ class TeamLeadAgent(BaseAgent):
                         f"Resolve the prerequisite, then report back to "
                         f"the Team Lead."
                     ),
+                ),
+            )
+        ]
+
+    def _re_decompose_on_too_large(self, msg: AgentMessage) -> list[AgentMessage]:
+        """iter-21: self-targeted task_assignment that triggers a TL re-decomp.
+
+        Backend's tripwire echoes the original task description (first
+        800 chars) into the BLOCKED summary; we forward that into the
+        new task_assignment. TL's standard handle() runs the
+        decomposition LLM and emits smaller Backend subtasks.
+
+        Anti-loop: refuse if the BLOCKED summary already carries the
+        'auto-routed already' marker (Backend's tripwire propagates it
+        when the incoming task description was itself an auto-route).
+        """
+        assert isinstance(msg.payload, TaskReportPayload)
+        summary = msg.payload.summary
+        if _ALREADY_ROUTED_MARKER in summary.lower():
+            self._log.info(
+                "tl.task_too_large_anti_loop_refused",
+                sender=msg.sender.value,
+                correlation_id=str(msg.correlation_id),
+            )
+            return []
+        self._log.info(
+            "tl.task_too_large_re_decompose",
+            sender=msg.sender.value,
+            correlation_id=str(msg.correlation_id),
+        )
+        description = (
+            f"[{_AUTO_ROUTED_MARKER} from {msg.sender.value}] "
+            f"{msg.sender.value} reported BLOCKED(task_too_large). "
+            "Re-decompose the original work into 2-3 smaller subtasks "
+            "of <=100 LOC each (or fewer if that's still too large), "
+            "and dispatch them to backend_developer with explicit "
+            "depends_on slugs where needed. Backend's original BLOCKED "
+            f"report follows:\n\n{summary}"
+        )[:10_000]
+        return [
+            AgentMessage(
+                correlation_id=msg.correlation_id,
+                sender=AgentId.TEAM_LEAD,
+                recipient=AgentId.TEAM_LEAD,
+                message_type=MessageType.TASK_ASSIGNMENT,
+                priority=msg.priority,
+                payload=TaskAssignmentPayload(
+                    task_id=uuid4(),
+                    title=f"Re-decompose: {summary[:80]}",
+                    description=description,
                 ),
             )
         ]
