@@ -367,3 +367,45 @@ def test_backend_prompt_teaches_scope_preflight() -> None:
         or "more than 2 files" in text.lower()
         or "2 files" in text
     )
+
+
+def test_backend_schema_constrains_blocked_on_enum() -> None:
+    """iter-23: BACKEND_REPORT_SCHEMA's blocked_on field is an enum.
+
+    Demo run #1 caught the LLM emitting a 200-char free-form sentence
+    in blocked_on, which broke TL's routing match. The schema must
+    force the LLM to use a canonical routing token — elaboration
+    belongs in `summary`.
+    """
+    from agents.backend_developer.agent import BACKEND_REPORT_SCHEMA
+
+    props = BACKEND_REPORT_SCHEMA["properties"]
+    assert isinstance(props, dict)
+    blocked_on_prop = props["blocked_on"]
+    assert isinstance(blocked_on_prop, dict)
+    assert "enum" in blocked_on_prop, "blocked_on must be enum-constrained"
+    enum_values = set(blocked_on_prop["enum"])
+    assert "task_too_large" in enum_values
+    assert "budget" in enum_values
+    assert "mcp_unhealthy" in enum_values
+    assert None in enum_values, "must permit null when status != blocked"
+
+
+def test_backend_prompt_mandates_literal_blocked_on_token() -> None:
+    """iter-23: the prompt must instruct the LLM to use the literal
+    `task_too_large` string for the blocked_on field — no
+    paraphrasing, no description. Demo run #1 LLM produced
+    "tests can't be collected... exceeding the 2-file scope limit"
+    which TL ignored. Pin the literal-token instruction so future
+    prompt edits don't quietly drop it."""
+    prompt_path = _REPO_ROOT_FOR_PROMPT / "prompts" / "backend_developer.md"
+    text = prompt_path.read_text().lower()
+    # Some phrasing that conveys "use the literal canonical token".
+    assert any(
+        marker in text
+        for marker in [
+            "must be the literal",
+            'literal string `"task_too_large"`',
+            "no elaboration",
+        ]
+    ), "Backend prompt must mandate literal task_too_large for blocked_on"

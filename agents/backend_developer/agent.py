@@ -102,8 +102,19 @@ BACKEND_REPORT_SCHEMA: dict[str, object] = {
         # forwarded; the other fields can be empty/defaults. See
         # docs/iterations/iter_22.md Phase 1 and the "Scope pre-flight"
         # section in prompts/backend_developer.md.
+        #
+        # iter-23 demo run #1 (correlation 6e294dad) Caveat: LLM emitted
+        # blocked_on as a verbose free-form sentence (~200 chars)
+        # describing the scope problem instead of the canonical token.
+        # TL's iter-21 re-decomposition handler matches blocked_on
+        # exactly against "task_too_large", so the chain stalled. Fix:
+        # constrain blocked_on to an enum of canonical tokens. LLM
+        # elaboration belongs in `summary`, not in this routing field.
         "status": {"type": "string", "enum": ["done", "failed", "blocked"]},
-        "blocked_on": {"type": ["string", "null"]},
+        "blocked_on": {
+            "type": ["string", "null"],
+            "enum": ["task_too_large", "budget", "mcp_unhealthy", None],
+        },
     },
 }
 

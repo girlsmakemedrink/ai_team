@@ -215,6 +215,28 @@ async def test_re_decomposes_on_blocked_task_too_large() -> None:
     assert out.correlation_id == msg.correlation_id
 
 
+@pytest.mark.asyncio
+async def test_re_decomposes_on_blocked_with_task_too_large_substring() -> None:
+    """iter-23 belt-and-suspenders: even if the schema enum is somehow
+    bypassed and Backend emits a verbose blocked_on like
+    "task_too_large: 3 files exceeds limit", TL still recognises it and
+    routes through the re-decompose path. Substring match catches
+    legacy/in-flight messages from older builds where the LLM
+    interpreted the prompt example as paraphrasable.
+    """
+    agent = TeamLeadAgent(llm=_StubLLM())
+    msg = _blocked_report(
+        sender=AgentId.BACKEND_DEVELOPER,
+        blocked_on="task_too_large: 3 production files exceed 2-file scope",
+        summary="Backend scope estimate exceeds turn-1 budget",
+    )
+    outputs = await agent.handle(msg)
+    assert len(outputs) == 1
+    assert outputs[0].recipient == AgentId.TEAM_LEAD
+    assert isinstance(outputs[0].payload, TaskAssignmentPayload)
+    assert "re-decompose" in outputs[0].payload.description.lower()
+
+
 def test_tl_prompt_teaches_mandatory_architect_backend_depends_on() -> None:
     """iter-22 Phase 2: when both architect and backend_developer are
     in the same decomposition, Backend MUST depends_on Architect."""
