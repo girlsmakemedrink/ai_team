@@ -51,6 +51,7 @@
     .score-inline   { display: none; font-family: var(--font-mono); font-size: 0.875rem; color: var(--neutral); margin-bottom: 0.75rem; }
     pre.report { background: rgba(44,62,80,0.05); color: var(--neutral); font-family: var(--font-mono); font-size: 0.875rem; line-height: 1.6; overflow-x: auto; max-height: 480px; overflow-y: auto; border-radius: 0 6px 6px 0; padding: 1.25rem; white-space: pre; border-left: 3px solid var(--accent); }
 
+    .social-proof { padding: 0.75rem 0; text-align: center; font-size: 0.875rem; color: rgba(44,62,80,0.7); border-top: 1px solid rgba(44,62,80,0.1); border-bottom: 1px solid rgba(44,62,80,0.1); }
     .install { padding: 2rem 0; border-top: 1px solid rgba(44,62,80,0.1); }
     .install h2 { margin-bottom: 0.75rem; }
     .install-note { font-size: 0.9rem; color: rgba(44,62,80,0.7); margin-bottom: 1rem; }
@@ -99,11 +100,16 @@
     <div class="wrap">
       <h1 id="hero-heading">Stress-test your product idea in seconds.</h1>
       <p class="hero-sub">Competitors &#xB7; market estimate &#xB7; risks &#xB7; differentiators &#xB7; viability score &#x2014; no sign-up, no form, just your terminal.</p>
-      <pre class="cmd" aria-label="Example CLI command">$ idea-validator analyze --idea "AI tutoring marketplace" \
+      <pre class="cmd" aria-label="Example CLI command">$ pip install idea-validator
+$ idea-validator analyze --idea "AI tutoring marketplace" \
   --depth standard --output-dir ./reports</pre>
       <a class="cta" href="../../../examples/sandbox/idea-validator/README.md">Get started &#x2192;</a>
     </div>
   </section>
+
+  <div class="social-proof" role="note" aria-label="Key capabilities">
+    <div class="wrap">&#x2713; 6 analysis stages &nbsp;&middot;&nbsp; &lt; 30 s per run &nbsp;&middot;&nbsp; no signup</div>
+  </div>
 
   <section class="features" aria-labelledby="features-heading">
     <div class="wrap">
@@ -205,7 +211,7 @@ first 3 years.
   <section class="install" id="install" aria-labelledby="install-heading">
     <div class="wrap">
       <h2 id="install-heading">Install</h2>
-      <p class="install-note">Requires Python 3.11+. No API key needed for <code>--depth quick</code>.</p>
+      <p class="install-note">Requires Python 3.11+. No API key needed for <code>--depth quick</code>. <a href="../../../examples/sandbox/idea-validator/README.md">Full docs &#x2192;</a></p>
       <pre class="cmd" aria-label="Install command">$ pip install idea-validator</pre>
       <pre class="cmd" aria-label="Analyze command">$ idea-validator analyze --idea "AI tutoring marketplace" \
   --depth quick --output-dir ./reports</pre>
