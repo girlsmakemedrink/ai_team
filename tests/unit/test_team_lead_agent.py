@@ -423,6 +423,22 @@ def test_tl_prompt_includes_conservative_depends_on_rule() -> None:
     assert "Before emitting, audit each `depends_on` entry" in text
 
 
+# === iter-20 Phase 2: pin Backend decomposition guidance ===
+
+
+def test_tl_prompt_teaches_backend_decomposition() -> None:
+    """iter-20 Phase 2: TL prompt must explicitly instruct
+    decomposition of large Backend tasks. Backend's 600s timeout
+    was the chain-killer in iter-19 demo run #1; iter-20 prompts
+    TL to avoid emitting single huge Backend subtasks. See
+    iter_19_demo_report.md Caveat A."""
+    text = TeamLeadAgent.system_prompt_path.read_text()
+    assert "200 LOC" in text or "200 lines" in text, (
+        "TL prompt missing iter-20 Backend-decomposition guidance"
+    )
+    assert "backend" in text.lower()
+
+
 # === iter-4 Phase 4: DAG-preview broadcast ===
 
 
