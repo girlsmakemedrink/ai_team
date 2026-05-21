@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# HISTORICAL — see scripts/demo_iter_25.sh for the current iteration's
-# demo. iter-25 adds a 60-second post-success drain so QA's task_report
-# audit row gets written before EXIT trap shutdown.
+# Iter-25 demo: same 6-stage DAG as iter-10..24 (PM → Architect
+# → Backend | Designer → Frontend → QA). iter-25 is a
+# REPRODUCIBILITY iteration — same shape as iter-25 demo
+# (which produced the first-ever clean chain), with a single
+# operational improvement: a 60-second post-success drain so
+# QA's `task_report` audit row gets written before EXIT trap
+# shutdown.
 #
-# Iter-24 demo: same 6-stage DAG as iter-10..23 (PM → Architect
-# → Backend | Designer → Frontend → QA). iter-24 closes the
-# upstream Backend issues that prevented the chain from reaching
-# QA in iter-23, so the already-shipped iter-23 safety net can
-# finally land the 5-iteration-deferred pending_reviews row in
-# a real-LLM demo.
+# iter-25 ran ONCE and produced the criterion. iter-25 runs
+# this script 2 more times to confirm Backend DONE is stable
+# across LLM samples — N=3 total counting iter-25.
 #
-#   1. iter-24 Phase 2: TL summary-prefix scope detection.
+# Inherits all iter-25 architecture:
+#
+#   1. iter-25 Phase 2: TL summary-prefix scope detection.
 #      _maybe_route_blocked now treats `summary.startswith(
 #      "Scope pre-flight")` as the canonical self-eject signal,
 #      regardless of `blocked_on` content. Backend's prompt
@@ -20,20 +23,20 @@
 #      blocked_on with a free-form sentence; this signal is
 #      immune to that drift.
 #
-#   2. iter-24 Phase 3: Backend prompt instructs the LLM that
+#   2. iter-25 Phase 3: Backend prompt instructs the LLM that
 #      a missing target directory is NORMAL and should be
 #      created via write_file_in_scope — not treated as a
 #      scope-too-large self-eject. iter-23 R#1's Backend
 #      ejected partly because `examples/` was absent.
 #
-#   3. iter-24 Phase 1: A/B test proved the iter-23 enum
+#   3. iter-25 Phase 1: A/B test proved the iter-23 enum
 #      retry-loop theory WRONG. claude -p with enum constraint
 #      does not retry/burn budget; it remaps to the nearest
 #      valid value. iter-23 R#2's BLOCKED(budget) had a
 #      different cause (likely tool-call loop on real work).
 #
-#   4. iter-24 Phase 4 (this script): demo EXIT trap MOVES
-#      the API log to docs/iterations/iter_24_demo_logs/ instead
+#   4. iter-25 Phase 4 (this script): demo EXIT trap MOVES
+#      the API log to docs/iterations/iter_25_demo_logs/ instead
 #      of deleting it. iter-23 lost both runs' logs to the rm.
 #
 #   5. Inherits all prior iterations' contracts. The iter-23
@@ -76,7 +79,7 @@ while (( SECONDS < deadline )); do
     sleep 2
 done
 
-step "1.5/7 — Prune stale agent worktrees (iter-24)"
+step "1.5/7 — Prune stale agent worktrees (iter-25)"
 # iter-20: handle_create_branch now creates isolated worktrees under
 # .claude/agent-worktrees/. Stale ones from prior demo runs would
 # confuse `git worktree add`. Prune first.
@@ -95,7 +98,7 @@ uv run alembic upgrade head >/dev/null
 ok "schema applied"
 
 step "3/7 — Write MCP config (direct .venv/bin/python)"
-MCP_CONFIG="$(pwd)/.iter24-mcp.json"
+MCP_CONFIG="$(pwd)/.iter25-mcp.json"
 REPO_ROOT="$(pwd)"
 VENV_PY="${REPO_ROOT}/.venv/bin/python"
 cat >"$MCP_CONFIG" <<JSON
@@ -129,13 +132,13 @@ API_LOG=$(mktemp)
 export AI_TEAM_MCP_CONFIG_PATH="$MCP_CONFIG"
 uv run uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 >"$API_LOG" 2>&1 &
 API_PID=$!
-_cleanup_iter24() {
+_cleanup_iter25() {
     kill "$API_PID" 2>/dev/null || true
-    # iter-24: preserve the API log for post-mortem instead of deleting it.
-    # iter-24 demos lost both runs' logs to `rm -f "$API_LOG"`, denying
+    # iter-25: preserve the API log for post-mortem instead of deleting it.
+    # iter-25 demos lost both runs' logs to `rm -f "$API_LOG"`, denying
     # any forensic analysis of the BLOCKED(budget) mystery. Now we MOVE
     # the log into the repo so retro reviewers can read it.
-    LOG_DIR="docs/iterations/iter_24_demo_logs"
+    LOG_DIR="docs/iterations/iter_25_demo_logs"
     mkdir -p "$LOG_DIR"
     if [[ -f "$API_LOG" ]]; then
         SHORT_CID="${CORRELATION:0:8}"
@@ -154,7 +157,7 @@ _cleanup_iter24() {
     fi
     git worktree prune 2>/dev/null || true
 }
-trap _cleanup_iter24 EXIT
+trap _cleanup_iter25 EXIT
 until curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1; do sleep 1; done
 ok "API ready (pid $API_PID, logs: $API_LOG)"
 
@@ -177,19 +180,19 @@ RESP=$(curl -sf -X POST http://127.0.0.1:8000/api/tasks \
     -H "Authorization: Bearer $OWNER_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{
-        "title": "iter-24 demo: idea-validator v2 (CLI + landing page + UX brief)",
+        "title": "iter-25 demo: idea-validator v2 (CLI + landing page + UX brief)",
         "description": "Implement idea-validator per docs/sandbox/idea_validator_v2_spec.md. Decompose into 6 subtasks with depends_on: pm_clarify (PM) → arch (Architect) → {be (Backend), design (Designer)} → fe (Frontend, depends_on=design) → qa (QA, depends_on=[be,fe]). The dispatcher will hold dependent subtasks until predecessors report done. Pass depends_on as slug references in the decomposition JSON.",
         "target_repo": "examples/sandbox/idea-validator"
     }')
 CORRELATION=$(echo "$RESP" | python3 -c 'import sys, json; print(json.load(sys.stdin)["correlation_id"])')
 ok "submitted (correlation $CORRELATION)"
 
-step "6/7 — Wait for the chain (up to 45 min — iter-24 bump) and surface artifacts"
+step "6/7 — Wait for the chain (up to 45 min — iter-25 bump) and surface artifacts"
 ADR_DIR="docs/adr"
 BACKEND_DIR="examples/sandbox/idea-validator"
 DESIGN_BRIEF="docs/design/idea-validator.md"
 LANDING_PAGE="apps/web/idea-validator/index.html"
-# iter-24 Phase 4: poll window bumped from 30 → 45 min. Matches the
+# iter-25 Phase 4: poll window bumped from 30 → 45 min. Matches the
 # CLAUDE.md-documented "30 min initial chain + 15 min retry window = 45
 # min total" budget. iter-22 demo's poll expired with Backend recovery
 # in flight at minute 30 (audit row 342 dispatched at T0+352s, no row
@@ -209,9 +212,21 @@ while (( SECONDS < deadline )); do
         || echo 0)
     if [[ "$qa_review_count" -ge 1 ]]; then
         ok "QA produced a pending_review (qa_engineer count=$qa_review_count)"
+        # iter-25: post-success drain. iter-24 demo broke the loop at
+        # the moment QA's safety net INSERTed the pending_reviews row;
+        # the dispatcher was killed by the EXIT trap before QA's
+        # outbound `task_report` reached the audit_writer. Result:
+        # missing row 385 in audit_log. The 60-second drain lets the
+        # outbound publish + audit_log INSERT complete before shutdown.
+        echo "Draining 60s for QA task_report audit write..."
+        sleep 60
+        rows=$(docker exec ai_team_postgres psql -U ai_team -d ai_team -t -A -c \
+            "SELECT count(*) FROM audit_log WHERE correlation_id='$CORRELATION';" 2>/dev/null \
+            | tr -d '[:space:]' || echo "?")
+        echo "[drain complete] audit_rows=${rows}"
         break
     fi
-    # iter-24 Phase 4: per-minute status line so the demo report can
+    # iter-25 Phase 4: per-minute status line so the demo report can
     # reconstruct "what was in flight when the poll expired" without
     # forensic audit_log reverse-engineering (iter-22 retro pain).
     elapsed=$SECONDS
@@ -315,7 +330,7 @@ else:
         print(f"approving {rid} ({r.get('requesting_agent','?')}: {r.get('summary','')[:80]})")
         subprocess.run(
             ["uv", "run", "ai-team", "approve", rid,
-             "--comment", "iter-24 demo auto-approve"],
+             "--comment", "iter-25 demo auto-approve"],
             check=False,
         )
 PY
@@ -358,8 +373,8 @@ if command -v psql >/dev/null 2>&1; then
 fi
 
 echo
-echo "--- iter-24 ACCEPTANCE CRITERION: QA-emitted pending_reviews row ---"
-# iter-24 demo run #1 found that /api/reviews only returns rows with
+echo "--- iter-25 ACCEPTANCE CRITERION: QA-emitted pending_reviews row ---"
+# iter-25 demo run #1 found that /api/reviews only returns rows with
 # status='pending'. By this step (after 6.6/7 auto-approve) all rows
 # are status='approved' and the endpoint shows count=0 — false negative.
 # Query the DB directly for ANY qa_engineer-authored row for this
@@ -368,9 +383,9 @@ final_qa_count=$(docker exec ai_team_postgres psql -U ai_team -d ai_team -t -A -
     "SELECT count(*) FROM pending_reviews WHERE requesting_agent='qa_engineer' AND correlation_id='$CORRELATION';" \
     2>/dev/null | tr -d '[:space:]' || echo 0)
 if [[ "$final_qa_count" -ge 1 ]]; then
-    ok "iter-24 CRITERION MET — qa_engineer pending_reviews count=$final_qa_count for correlation ${CORRELATION:0:8} (5-iteration deferred row finally landed)"
+    ok "iter-25 CRITERION MET — qa_engineer pending_reviews count=$final_qa_count for correlation ${CORRELATION:0:8} (5-iteration deferred row finally landed)"
 else
-    printf "\033[1;31m✗ iter-24 CRITERION NOT MET — qa_engineer pending_reviews count=%s for correlation %s\033[0m\n" "$final_qa_count" "${CORRELATION:0:8}"
+    printf "\033[1;31m✗ iter-25 CRITERION NOT MET — qa_engineer pending_reviews count=%s for correlation %s\033[0m\n" "$final_qa_count" "${CORRELATION:0:8}"
 fi
 echo
 echo "--- Pending reviews (full list, all statuses): ---"
