@@ -37,10 +37,32 @@ detail in `summary` instead. iter-23 demo run #1 caught the
 Backend LLM filling `blocked_on` with a verbose paragraph
 explaining why the scope was too large, which broke TL's
 routing match (the field is a routing key, not free-form text).
-The JSON schema enforces this with an enum
-(`["task_too_large", "budget", "mcp_unhealthy", null]`); any
-other value will fail validation and bounce as a malformed
-report.
+
+iter-24 added a structural backstop: the Team Lead also routes
+on `summary.startswith("Scope pre-flight")`, which is forced by
+the template above. So even if `blocked_on` drifts, the prefix
+gets you the re-decomposition. Keep the canonical token anyway —
+it's the documented contract and the substring fallback also
+fires on it.
+
+### Target directory handling (iter-24)
+
+**If your target directory does not yet exist** (e.g.,
+`examples/sandbox/<project>/` is missing from main or contains
+only an empty scaffold), this is **NORMAL for a first task**.
+Create the directory and its initial structure
+(`__init__.py`, `pyproject.toml`, `tests/`, etc.) as part of
+your work via `mcp__ai_team_repo__write_file_in_scope`.
+
+**Do not self-eject just because the target directory is empty
+or untracked.** The Scope pre-flight self-eject is ONLY for
+work that genuinely exceeds 2 files OR 200 LOC of NEW code.
+A missing scaffold counts as zero LOC and zero scope.
+
+iter-23 demo run #1 caught the LLM treating a missing
+`examples/` as a scope problem and self-ejecting — that wasn't
+right. The chain expects Backend to be the agent that fills
+the scaffold.
 
 The Team Lead receives the BLOCKED report and emits a
 smaller re-decomposition (iter-21 Phase 2 handler). **Do

@@ -1,47 +1,45 @@
 #!/usr/bin/env bash
-# HISTORICAL — see scripts/demo_iter_24.sh for the current iteration's
-# demo. iter-24 ships TL summary-prefix routing, Backend prompt for
-# missing target dir, API log preservation, and a confirmed A/B test
-# disproving the iter-23 enum-retry-loop theory.
+# Iter-24 demo: same 6-stage DAG as iter-10..23 (PM → Architect
+# → Backend | Designer → Frontend → QA). iter-24 closes the
+# upstream Backend issues that prevented the chain from reaching
+# QA in iter-23, so the already-shipped iter-23 safety net can
+# finally land the 5-iteration-deferred pending_reviews row in
+# a real-LLM demo.
 #
-# Iter-23 demo: same 6-stage DAG as iter-10..22 (PM → Architect
-# → Backend | Designer → Frontend → QA). iter-23 closes the
-# 4-iteration-deferred QA `pending_reviews` row criterion.
+#   1. iter-24 Phase 2: TL summary-prefix scope detection.
+#      _maybe_route_blocked now treats `summary.startswith(
+#      "Scope pre-flight")` as the canonical self-eject signal,
+#      regardless of `blocked_on` content. Backend's prompt
+#      template structurally enforces that prefix; the
+#      `blocked_on` field stays as a fallback for legacy
+#      messages. iter-23 R#1 stalled because the LLM filled
+#      blocked_on with a free-form sentence; this signal is
+#      immune to that drift.
 #
-# Phase 1 evidence
-# (tests/integration/test_qa_request_human_review_real_llm.py,
-# 0/3 runs both pre- and post-Phase-2-implementation) showed
-# QA's LLM produces schema-valid JSON but does NOT invoke
-# mcp__ai_team_tasks__request_human_review under --json-schema
-# pressure. This was the actual root cause of the 4-iteration
-# QA blocker — never observed because iter-19/20/21 Backend
-# timeouts blocked the chain from ever reaching QA in real
-# conditions. iter-23's "demo poll expired" theory was wrong.
+#   2. iter-24 Phase 3: Backend prompt instructs the LLM that
+#      a missing target directory is NORMAL and should be
+#      created via write_file_in_scope — not treated as a
+#      scope-too-large self-eject. iter-23 R#1's Backend
+#      ejected partly because `examples/` was absent.
 #
-#   1. iter-23 Phase 2: Python-side safety net in
-#      QAEngineerAgent.handle() — inspects response.tools_used
-#      and INSERTs the pending_reviews row directly via the
-#      injected session_factory when the LLM skipped the MCP
-#      tool. Plumbed through apps/api/main.py:93. Validated
-#      3/3 end-to-end at iter-23 Phase 2 (220s, $0.10).
-#      Owner-approval gate now lands deterministically.
+#   3. iter-24 Phase 1: A/B test proved the iter-23 enum
+#      retry-loop theory WRONG. claude -p with enum constraint
+#      does not retry/burn budget; it remaps to the nearest
+#      valid value. iter-23 R#2's BLOCKED(budget) had a
+#      different cause (likely tool-call loop on real work).
 #
-#   2. iter-23 Phase 3: RECOVERABLE_BLOCKED_ON +=
-#      "task_too_large". Closes iter-23 demo Caveat C.
+#   4. iter-24 Phase 4 (this script): demo EXIT trap MOVES
+#      the API log to docs/iterations/iter_24_demo_logs/ instead
+#      of deleting it. iter-23 lost both runs' logs to the rm.
 #
-#   3. iter-23 Phase 4 (this script): demo poll window 30 →
-#      45 min, matches the CLAUDE.md-documented budget.
+#   5. Inherits all prior iterations' contracts. The iter-23
+#      QA safety net (proven 3/3 in e2e) catches any LLM that
+#      fails to invoke request_human_review.
 #
-#   4. Inherits from iter-23: Backend self-eject prompt,
-#      mandatory Architect→Backend depends_on rule. Inherits
-#      from iter-21: Python tripwire (defense-in-depth),
-#      TL re-decomp handler, heredoc-vs-pipe bash fix
-#      (`python3 - "$JSON" <<'PY' ... sys.argv[1]`).
-#
-#   5. Expected outcome: chain reaches QA → QA produces a
-#      pending_reviews row (via the iter-23 Phase 2 safety
-#      net since the LLM doesn't reliably call the tool) →
-#      criterion finally met after 22+ iterations.
+#   6. Expected outcome: chain reaches QA → QA produces a
+#      pending_reviews row (via the iter-23 safety net since
+#      the LLM doesn't reliably call the tool) → 5-iteration
+#      criterion finally met.
 #
 # Wall-clock budget: 45 min initial chain + 15 min retry
 # window = 60 min total worst case. Cost ceiling: $5.00.
@@ -74,7 +72,7 @@ while (( SECONDS < deadline )); do
     sleep 2
 done
 
-step "1.5/7 — Prune stale agent worktrees (iter-23)"
+step "1.5/7 — Prune stale agent worktrees (iter-24)"
 # iter-20: handle_create_branch now creates isolated worktrees under
 # .claude/agent-worktrees/. Stale ones from prior demo runs would
 # confuse `git worktree add`. Prune first.
@@ -93,7 +91,7 @@ uv run alembic upgrade head >/dev/null
 ok "schema applied"
 
 step "3/7 — Write MCP config (direct .venv/bin/python)"
-MCP_CONFIG="$(pwd)/.iter23-mcp.json"
+MCP_CONFIG="$(pwd)/.iter24-mcp.json"
 REPO_ROOT="$(pwd)"
 VENV_PY="${REPO_ROOT}/.venv/bin/python"
 cat >"$MCP_CONFIG" <<JSON
@@ -127,9 +125,21 @@ API_LOG=$(mktemp)
 export AI_TEAM_MCP_CONFIG_PATH="$MCP_CONFIG"
 uv run uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 >"$API_LOG" 2>&1 &
 API_PID=$!
-_cleanup_iter23() {
+_cleanup_iter24() {
     kill "$API_PID" 2>/dev/null || true
-    rm -f "$API_LOG" "$MCP_CONFIG"
+    # iter-24: preserve the API log for post-mortem instead of deleting it.
+    # iter-24 demos lost both runs' logs to `rm -f "$API_LOG"`, denying
+    # any forensic analysis of the BLOCKED(budget) mystery. Now we MOVE
+    # the log into the repo so retro reviewers can read it.
+    LOG_DIR="docs/iterations/iter_24_demo_logs"
+    mkdir -p "$LOG_DIR"
+    if [[ -f "$API_LOG" ]]; then
+        SHORT_CID="${CORRELATION:0:8}"
+        DEST="$LOG_DIR/${SHORT_CID:-unknown}.log"
+        mv "$API_LOG" "$DEST" 2>/dev/null || cp "$API_LOG" "$DEST" 2>/dev/null || true
+        echo "API log preserved: $DEST"
+    fi
+    rm -f "$MCP_CONFIG"
     # iter-20: clean up isolated agent worktrees so the next run starts fresh
     if [[ -d .claude/agent-worktrees ]]; then
         for wt in .claude/agent-worktrees/*/; do
@@ -140,7 +150,7 @@ _cleanup_iter23() {
     fi
     git worktree prune 2>/dev/null || true
 }
-trap _cleanup_iter23 EXIT
+trap _cleanup_iter24 EXIT
 until curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1; do sleep 1; done
 ok "API ready (pid $API_PID, logs: $API_LOG)"
 
@@ -163,19 +173,19 @@ RESP=$(curl -sf -X POST http://127.0.0.1:8000/api/tasks \
     -H "Authorization: Bearer $OWNER_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{
-        "title": "iter-23 demo: idea-validator v2 (CLI + landing page + UX brief)",
+        "title": "iter-24 demo: idea-validator v2 (CLI + landing page + UX brief)",
         "description": "Implement idea-validator per docs/sandbox/idea_validator_v2_spec.md. Decompose into 6 subtasks with depends_on: pm_clarify (PM) → arch (Architect) → {be (Backend), design (Designer)} → fe (Frontend, depends_on=design) → qa (QA, depends_on=[be,fe]). The dispatcher will hold dependent subtasks until predecessors report done. Pass depends_on as slug references in the decomposition JSON.",
         "target_repo": "examples/sandbox/idea-validator"
     }')
 CORRELATION=$(echo "$RESP" | python3 -c 'import sys, json; print(json.load(sys.stdin)["correlation_id"])')
 ok "submitted (correlation $CORRELATION)"
 
-step "6/7 — Wait for the chain (up to 45 min — iter-23 bump) and surface artifacts"
+step "6/7 — Wait for the chain (up to 45 min — iter-24 bump) and surface artifacts"
 ADR_DIR="docs/adr"
 BACKEND_DIR="examples/sandbox/idea-validator"
 DESIGN_BRIEF="docs/design/idea-validator.md"
 LANDING_PAGE="apps/web/idea-validator/index.html"
-# iter-23 Phase 4: poll window bumped from 30 → 45 min. Matches the
+# iter-24 Phase 4: poll window bumped from 30 → 45 min. Matches the
 # CLAUDE.md-documented "30 min initial chain + 15 min retry window = 45
 # min total" budget. iter-22 demo's poll expired with Backend recovery
 # in flight at minute 30 (audit row 342 dispatched at T0+352s, no row
@@ -197,7 +207,7 @@ while (( SECONDS < deadline )); do
         ok "QA produced a pending_review (qa_engineer count=$qa_review_count)"
         break
     fi
-    # iter-23 Phase 4: per-minute status line so the demo report can
+    # iter-24 Phase 4: per-minute status line so the demo report can
     # reconstruct "what was in flight when the poll expired" without
     # forensic audit_log reverse-engineering (iter-22 retro pain).
     elapsed=$SECONDS
@@ -301,7 +311,7 @@ else:
         print(f"approving {rid} ({r.get('requesting_agent','?')}: {r.get('summary','')[:80]})")
         subprocess.run(
             ["uv", "run", "ai-team", "approve", rid,
-             "--comment", "iter-23 demo auto-approve"],
+             "--comment", "iter-24 demo auto-approve"],
             check=False,
         )
 PY
@@ -344,15 +354,15 @@ if command -v psql >/dev/null 2>&1; then
 fi
 
 echo
-echo "--- iter-23 ACCEPTANCE CRITERION: QA-emitted pending_reviews row ---"
+echo "--- iter-24 ACCEPTANCE CRITERION: QA-emitted pending_reviews row ---"
 final_qa_count=$(curl -sf -H "Authorization: Bearer $OWNER_TOKEN" \
     http://127.0.0.1:8000/api/reviews 2>/dev/null \
     | python3 -c 'import sys, json; data = json.load(sys.stdin); print(sum(1 for r in data if r.get("requesting_agent") == "qa_engineer"))' 2>/dev/null \
     || echo 0)
 if [[ "$final_qa_count" -ge 1 ]]; then
-    ok "iter-23 CRITERION MET — qa_engineer pending_reviews count=$final_qa_count (4-iteration deferred row finally landed)"
+    ok "iter-24 CRITERION MET — qa_engineer pending_reviews count=$final_qa_count (4-iteration deferred row finally landed)"
 else
-    printf "\033[1;31m✗ iter-23 CRITERION NOT MET — qa_engineer pending_reviews count=%s\033[0m\n" "$final_qa_count"
+    printf "\033[1;31m✗ iter-24 CRITERION NOT MET — qa_engineer pending_reviews count=%s\033[0m\n" "$final_qa_count"
 fi
 echo
 echo "--- Pending reviews (full list): ---"

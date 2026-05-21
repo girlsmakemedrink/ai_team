@@ -44,6 +44,15 @@ _BLOCKED_SUMMARY_RE = re.compile(r"blocked:\s*requires\s+(\w+)", re.IGNORECASE)
 # not a valid AgentId). See docs/iterations/iter_21.md Phase 2.
 _TASK_TOO_LARGE_BLOCKED_ON = "task_too_large"
 _ALREADY_ROUTED_MARKER = "auto-routed already"
+# iter-24: more reliable routing signal than `blocked_on`. Backend's
+# Scope pre-flight prompt template (prompts/backend_developer.md:25)
+# guarantees the BLOCKED summary starts with this literal prefix. The
+# `blocked_on` field is semantic (LLM elaborates into it); the summary
+# prefix is structural (the LLM copies it from the template). iter-23
+# demo R#1 stalled because the LLM put scope description into
+# blocked_on instead of the canonical token; this signal sidesteps
+# that fragility entirely.
+_SCOPE_PREFLIGHT_SUMMARY_PREFIX = "Scope pre-flight"
 
 
 # Per-subtask slug pattern, also reused for depends_on references.
@@ -270,17 +279,20 @@ class TeamLeadAgent(BaseAgent):
         if msg.payload.status != TaskStatus.BLOCKED:
             return []
 
-        # iter-23: belt-and-suspenders alongside iter-23's
-        # BACKEND_REPORT_SCHEMA enum constraint. Exact match catches the
-        # canonical token; substring fallback catches LLM elaborations
-        # like "task_too_large: 3 files exceeds 2-file limit" that the
-        # schema enum should prevent but stays robust if the validator
-        # is bypassed (e.g. legacy in-flight messages from older builds).
-        # iter-22's "exact match" requirement was the root cause of the
-        # iter-23 demo run #1 stall — TL ignored Backend's verbose
-        # blocked_on string and the chain never reached QA.
+        # iter-24: primary self-eject signal is the BLOCKED summary's
+        # Scope pre-flight prefix — structurally enforced by Backend's
+        # prompt template (prompts/backend_developer.md:25). This is
+        # immune to the iter-23 R#1 failure mode where the LLM filled
+        # blocked_on with a free-form sentence instead of the canonical
+        # token. iter-23 substring on blocked_on stays as a fallback
+        # for legacy in-flight messages.
+        summary = (msg.payload.summary or "").strip()
         bo = (msg.payload.blocked_on or "").strip()
-        if bo == _TASK_TOO_LARGE_BLOCKED_ON or _TASK_TOO_LARGE_BLOCKED_ON in bo.lower():
+        if (
+            summary.startswith(_SCOPE_PREFLIGHT_SUMMARY_PREFIX)
+            or bo == _TASK_TOO_LARGE_BLOCKED_ON
+            or _TASK_TOO_LARGE_BLOCKED_ON in bo.lower()
+        ):
             return self._re_decompose_on_too_large(msg)
 
         # Anti-loop: if the BLOCKED report was already an auto-routed

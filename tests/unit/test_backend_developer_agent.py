@@ -391,6 +391,32 @@ def test_backend_schema_blocked_on_permissive_string_or_null() -> None:
     assert "enum" not in blocked_on_prop
 
 
+def test_backend_prompt_handles_missing_target_dir() -> None:
+    """iter-24: Backend prompt instructs the LLM that a missing target
+    directory is NORMAL for first tasks and should be created via
+    write_file_in_scope, NOT treated as a scope-too-large self-eject.
+
+    iter-23 demo run #1 caught the LLM self-ejecting because
+    `examples/` was untracked in the orchestrator and absent from
+    main. That was incorrect — Backend is the agent that fills the
+    scaffold. This pin prevents future prompt edits from quietly
+    dropping the guidance.
+    """
+    prompt_path = _REPO_ROOT_FOR_PROMPT / "prompts" / "backend_developer.md"
+    text = prompt_path.read_text().lower()
+    # Some phrasing that conveys "missing target dir is normal, do
+    # not self-eject for that reason; create it".
+    assert "target directory" in text or "target dir" in text
+    assert any(
+        marker in text
+        for marker in [
+            "normal for a first task",
+            "missing scaffold",
+            "do not self-eject just because the target directory is empty",
+        ]
+    )
+
+
 def test_backend_prompt_mandates_literal_blocked_on_token() -> None:
     """iter-23: the prompt must instruct the LLM to use the literal
     `task_too_large` string for the blocked_on field — no
