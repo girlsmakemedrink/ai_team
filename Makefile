@@ -3,7 +3,7 @@
         test test-unit test-integration test-smoke test-real-llm \
         lint typecheck format format-check fix sec \
         migrate alembic-rev \
-        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 demo-iter-5 demo-iter-6 demo-iter-7 demo-iter-8 demo-iter-9 demo-iter-10 demo-iter-11 demo-iter-12 demo-iter-13 demo-iter-14 demo-iter-15 demo-iter-16 demo-iter-17 demo-iter-18 demo-iter-19 demo-iter-20 demo-iter-21 \
+        smoke-llm demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 demo-iter-5 demo-iter-6 demo-iter-7 demo-iter-8 demo-iter-9 demo-iter-10 demo-iter-11 demo-iter-12 demo-iter-13 demo-iter-14 demo-iter-15 demo-iter-16 demo-iter-17 demo-iter-18 demo-iter-19 demo-iter-20 demo-iter-21 demo-iter-22 \
         clean
 
 help: ## Show available targets
@@ -96,7 +96,10 @@ alembic-rev: ## New alembic revision (usage: make alembic-rev MSG="description")
 smoke-llm: ## Validate `claude -p` substrate (ADR-008)
 	uv run python scripts/smoke_claude_p.py
 
-demo: demo-iter-21 ## Alias for the current iteration's demo
+demo: demo-iter-22 ## Alias for the current iteration's demo
+
+demo-iter-22: ## Run iter-22 e2e (Backend LLM self-eject + TL Architect→Backend depends_on)
+	bash scripts/demo_iter_22.sh
 
 demo-iter-21: ## Run iter-21 e2e (Backend runtime tripwire + TL re-decomp + auto-approve bash fix)
 	bash scripts/demo_iter_21.sh
