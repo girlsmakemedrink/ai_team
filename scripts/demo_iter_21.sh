@@ -1,37 +1,50 @@
 #!/usr/bin/env bash
-# Iter-20 demo: same 6-stage DAG as iter-10..19 (PM → Architect
+# Iter-21 demo: same 6-stage DAG as iter-10..20 (PM → Architect
 # → Backend | Designer → Frontend → QA per
-# docs/sandbox/idea_validator_v2_spec.md). iter-20 closes the
-# TWO killer findings from iter-19's demo so the chain can
+# docs/sandbox/idea_validator_v2_spec.md). iter-21 closes the
+# two TOP carry-overs from iter-20's demo so the chain can
 # finally reach QA and produce a `pending_reviews` row with
-# requesting_agent='qa_engineer'.
+# requesting_agent='qa_engineer' (2-iteration deferred).
 #
-#   1. iter-19 demo Caveat B (branch-isolation) — Backend agent
-#      ran handle_create_branch which executed
-#      `git checkout -b <branch> <base>` against the
-#      orchestrator's own worktree, switching HEAD to the
-#      agent's branch mid-chain. iter-20 Phase 1 replaces the
-#      call with `git worktree add` so the orchestrator's HEAD
-#      is unaffected. A module-level _ACTIVE_WORKTREE on the
-#      MCP server tracks the isolated worktree for subsequent
-#      handler calls.
+#   1. iter-20 demo Caveat A (Backend 600s timeout —
+#      11-iteration carry-over) — iter-20 Phase 2's prompt-only
+#      decomposition fix produced the structural change (TL
+#      emits 2 Backend subtasks) but LLM compliance on the
+#      "<=200 LOC" instruction was imperfect — one subtask
+#      still hit 600s. iter-21 Phase 1 adds a Backend RUNTIME
+#      tripwire in BackendDeveloperAgent.handle(): pre-flight
+#      heuristic (char count > 1500 OR >= 3 file-path tokens
+#      not on disk) -> BLOCKED(blocked_on='task_too_large')
+#      before the LLM is invoked. iter-21 Phase 2 extends TL's
+#      _maybe_route_blocked with a self-targeted re-decomp turn
+#      so the chain recovers automatically (anti-loop cap = 1).
 #
-#   2. iter-19 demo Caveat A (Backend 600s timeout —
-#      10-iteration carry-over) — iter-20 Phase 2 adds a TL
-#      prompt edit instructing decomposition of Backend work
-#      over ~200 LOC into multiple subtasks with depends_on
-#      slugs. Prompt-only; runtime tripwire deferred to
-#      iter-21+ if this doesn't fix the timeout.
+#   2. iter-20 demo Caveat B (auto-approve JSONDecodeError —
+#      3-iteration carry-over: iter-18 -> iter-19 -> iter-20).
+#      Real root cause finally identified post-iter-20:
+#      `printf '%s' "$JSON" | python3 <<'PY' ... PY` is a
+#      heredoc-vs-pipe conflict. Bash routes python's stdin to
+#      the HEREDOC (source code), NOT to the piped JSON, so
+#      json.load(sys.stdin) parses python source and fails on
+#      char 0. iter-18 and iter-19 fix attempts (echo fallback,
+#      ${VAR:-[]}+printf) both patched the wrong layer. The fix
+#      this script uses: `python3 - "$JSON" <<'PY' ...
+#      sys.argv[1]` — the `-` arg makes python read source from
+#      stdin (the heredoc), and the JSON arrives via
+#      sys.argv[1]. No conflict.
 #
-#   3. iter-20 Phase 3 (this script) — pre-flight
+#   3. iter-20 Phase 3 (this script inherits) — pre-flight
 #      `git worktree prune` + .claude/agent-worktrees/ rm
 #      ensures stale paths from prior demo runs don't confuse
 #      `git worktree add`. EXIT trap removes each agent
 #      worktree on cleanup.
 #
 #   4. Expected outcome: orchestrator HEAD stays on
-#      worktree-iter-20 throughout; chain reaches QA done; QA
-#      writes the pending_review row that iter-19 deferred.
+#      worktree-iter-21 throughout; if TL's initial Backend
+#      decomposition produces a too-large subtask, Backend
+#      tripwire fires -> BLOCKED(task_too_large) -> TL
+#      re-decomposes -> smaller subtasks complete -> QA writes
+#      the pending_review row that iter-19/20 deferred.
 #
 # Wall-clock budget: 30 min initial chain + 15 min retry window
 # = 45 min total. Cost ceiling: $5.00 (iter-19 was ~$2.00).
@@ -64,7 +77,7 @@ while (( SECONDS < deadline )); do
     sleep 2
 done
 
-step "1.5/7 — Prune stale agent worktrees (iter-20)"
+step "1.5/7 — Prune stale agent worktrees (iter-21)"
 # iter-20: handle_create_branch now creates isolated worktrees under
 # .claude/agent-worktrees/. Stale ones from prior demo runs would
 # confuse `git worktree add`. Prune first.
@@ -83,7 +96,7 @@ uv run alembic upgrade head >/dev/null
 ok "schema applied"
 
 step "3/7 — Write MCP config (direct .venv/bin/python)"
-MCP_CONFIG="$(pwd)/.iter20-mcp.json"
+MCP_CONFIG="$(pwd)/.iter21-mcp.json"
 REPO_ROOT="$(pwd)"
 VENV_PY="${REPO_ROOT}/.venv/bin/python"
 cat >"$MCP_CONFIG" <<JSON
@@ -117,7 +130,7 @@ API_LOG=$(mktemp)
 export AI_TEAM_MCP_CONFIG_PATH="$MCP_CONFIG"
 uv run uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 >"$API_LOG" 2>&1 &
 API_PID=$!
-_cleanup_iter20() {
+_cleanup_iter21() {
     kill "$API_PID" 2>/dev/null || true
     rm -f "$API_LOG" "$MCP_CONFIG"
     # iter-20: clean up isolated agent worktrees so the next run starts fresh
@@ -130,7 +143,7 @@ _cleanup_iter20() {
     fi
     git worktree prune 2>/dev/null || true
 }
-trap _cleanup_iter20 EXIT
+trap _cleanup_iter21 EXIT
 until curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1; do sleep 1; done
 ok "API ready (pid $API_PID, logs: $API_LOG)"
 
@@ -153,7 +166,7 @@ RESP=$(curl -sf -X POST http://127.0.0.1:8000/api/tasks \
     -H "Authorization: Bearer $OWNER_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{
-        "title": "iter-20 demo: idea-validator v2 (CLI + landing page + UX brief)",
+        "title": "iter-21 demo: idea-validator v2 (CLI + landing page + UX brief)",
         "description": "Implement idea-validator per docs/sandbox/idea_validator_v2_spec.md. Decompose into 6 subtasks with depends_on: pm_clarify (PM) → arch (Architect) → {be (Backend), design (Designer)} → fe (Frontend, depends_on=design) → qa (QA, depends_on=[be,fe]). The dispatcher will hold dependent subtasks until predecessors report done. Pass depends_on as slug references in the decomposition JSON.",
         "target_repo": "examples/sandbox/idea-validator"
     }')
@@ -245,27 +258,29 @@ else
 fi
 
 step "6.6/7 — Auto-approve any pending_reviews (close the loop)"
-# iter-19 fix (iter-18 demo Caveat 4): belt-and-braces fallback.
-# iter-18 run #2 hit JSONDecodeError on empty stdin even though the
-# API was responsive — bash precedence on `$(... || echo '[]')` is
-# fragile under `set -u -o pipefail`. Assign curl output (allowing
-# failure via `|| true`), then `${VAR:-[]}` to guarantee non-empty
-# input to python. `printf '%s'` avoids `echo`'s leading-hyphen /
-# backslash-interpretation quirks on some platforms.
-# WARNING (added in iter-21): the iter-19 fix below STILL hits
-# JSONDecodeError because the real bug is `printf '%s' "$JSON" |
-# python3 <<'PY'` — bash routes python's stdin to the HEREDOC
-# source code, not the piped JSON. Fixed in
-# scripts/demo_iter_21.sh via `python3 - "$JSON" <<'PY' ...
-# sys.argv[1]`. Do NOT copy this pattern into new demo scripts.
-# See docs/iterations/iter_21.md Phase 3 and
-# docs/iterations/iter_20_demo_report.md §Caveat B.
+# iter-21 fix (3-iteration carry-over: iter-18 -> iter-19 -> iter-20).
+# Real root cause finally identified post-iter-20: the pattern
+#     printf '%s' "$JSON" | python3 <<'PY' ... PY
+# is a heredoc-vs-pipe conflict. Bash routes python's stdin to the
+# HEREDOC (source code), NOT to the piped JSON, so
+# json.load(sys.stdin) parses python source and fails on char 0
+# with JSONDecodeError("Expecting value: line 1 column 1 (char 0)").
+# iter-18 and iter-19 fix attempts (echo fallback, ${VAR:-[]} +
+# printf) both patched the wrong layer.
+#
+# The fix below: `python3 - "$JSON" <<'PY' ... sys.argv[1]`. The
+# `-` arg makes python read source from stdin (the heredoc), and
+# the JSON arrives via sys.argv[1]. No conflict.
+#
+# See docs/iterations/iter_20_demo_report.md §Caveat B and
+# docs/iterations/iter_21.md Phase 3. Do NOT re-introduce the
+# pipe-into-heredoc pattern in new demo scripts.
 REVIEWS_JSON=$(curl -sf -H "Authorization: Bearer $OWNER_TOKEN" \
     http://127.0.0.1:8000/api/reviews 2>/dev/null || true)
 REVIEWS_JSON="${REVIEWS_JSON:-[]}"
-printf '%s' "$REVIEWS_JSON" | python3 <<'PY' || true
+python3 - "$REVIEWS_JSON" <<'PY' || true
 import json, subprocess, sys
-data = json.load(sys.stdin)
+data = json.loads(sys.argv[1])
 if not data:
     print("(no pending_reviews — chain didn't reach QA)")
 else:
@@ -274,7 +289,7 @@ else:
         print(f"approving {rid} ({r.get('requesting_agent','?')}: {r.get('summary','')[:80]})")
         subprocess.run(
             ["uv", "run", "ai-team", "approve", rid,
-             "--comment", "iter-20 demo auto-approve"],
+             "--comment", "iter-21 demo auto-approve"],
             check=False,
         )
 PY
