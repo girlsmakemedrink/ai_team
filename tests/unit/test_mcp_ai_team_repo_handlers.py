@@ -14,8 +14,8 @@ import asyncio
 import json
 import re
 import subprocess
-from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -27,6 +27,9 @@ from tools.mcp_servers.ai_team_repo.handlers import (
     handle_write_file_in_scope,
 )
 from tools.mcp_servers.ai_team_repo.scope import ScopeConfig
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def _ctx(root: Path, prefixes: tuple[str, ...] = ("*",)) -> Context:
@@ -53,9 +56,7 @@ def _reset_active_worktree() -> Iterator[None]:
 def tmp_git_repo(tmp_path: Path) -> Path:
     """Initialise a real tmp git repo with one commit on `main`.
     Required by iter-20 worktree tests."""
-    subprocess.run(
-        ["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True
-    )
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.email", "iter20@test.local"],
         cwd=tmp_path,
@@ -69,9 +70,7 @@ def tmp_git_repo(tmp_path: Path) -> Path:
         capture_output=True,
     )
     (tmp_path / "README.md").write_text("# iter-20 test repo\n")
-    subprocess.run(
-        ["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True
-    )
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
         ["git", "commit", "-m", "initial"],
         cwd=tmp_path,
@@ -257,10 +256,7 @@ def test_create_branch_does_not_switch_orchestrator_head(
     assert _orchestrator_head(tmp_git_repo) == "main"
     # New worktree directory exists at the expected location
     expected_path = (
-        tmp_git_repo
-        / ".claude"
-        / "agent-worktrees"
-        / "agent_backend_developer_iter-20-test"
+        tmp_git_repo / ".claude" / "agent-worktrees" / "agent_backend_developer_iter-20-test"
     )
     assert expected_path.is_dir()
     # And inside the worktree, HEAD is on the new branch

@@ -13,8 +13,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tools.mcp_servers.ai_team_repo.commands import (
     CommandRejected,
@@ -22,6 +21,9 @@ from tools.mcp_servers.ai_team_repo.commands import (
     set_forbidden_pr_base_re,
 )
 from tools.mcp_servers.ai_team_repo.scope import ScopeConfig, ScopeError, resolve_in_scope
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _BRANCH_ALLOWED_RE = re.compile(r"^agent/[a-z0-9_]+/[a-zA-Z0-9._\-/]+$")
 _DEFAULT_FORBID_BRANCH_RE = re.compile(r"^(main|master|release/.*)$")
