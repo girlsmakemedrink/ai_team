@@ -98,6 +98,20 @@ class TestEligibility:
         assert isinstance(result, RetryEligibility)
         assert result.retry_attempt == 2
 
+    def test_blocked_task_too_large_is_eligible(self) -> None:
+        """iter-23: TL auto-re-decomposes task_too_large BLOCKEDs, but
+        the owner-side `ai-team retry-blocked` CLI should also accept
+        it (iter-22 demo Caveat C: 422 was misleading)."""
+        task_id = uuid4()
+        cid = uuid4()
+        rows = [
+            _assignment(task_id, cid, AgentId.BACKEND_DEVELOPER),
+            _report(task_id, cid, TaskStatus.BLOCKED, blocked_on="task_too_large"),
+        ]
+        result = check_retry_eligibility(task_id, rows)
+        assert isinstance(result, RetryEligibility)
+        assert result.retry_attempt == 2
+
     def test_blocked_unknown_blocked_on_not_eligible(self) -> None:
         task_id = uuid4()
         cid = uuid4()
