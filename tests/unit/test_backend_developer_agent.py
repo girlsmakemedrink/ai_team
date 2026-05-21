@@ -12,7 +12,7 @@ tools, structured-response unpacking, failure paths.
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
@@ -29,6 +29,9 @@ from core.messaging.schemas import (
     TaskReportPayload,
     TaskStatus,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _StubLLM:
