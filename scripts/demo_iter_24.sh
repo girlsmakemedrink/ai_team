@@ -355,17 +355,21 @@ fi
 
 echo
 echo "--- iter-24 ACCEPTANCE CRITERION: QA-emitted pending_reviews row ---"
-final_qa_count=$(curl -sf -H "Authorization: Bearer $OWNER_TOKEN" \
-    http://127.0.0.1:8000/api/reviews 2>/dev/null \
-    | python3 -c 'import sys, json; data = json.load(sys.stdin); print(sum(1 for r in data if r.get("requesting_agent") == "qa_engineer"))' 2>/dev/null \
-    || echo 0)
+# iter-24 demo run #1 found that /api/reviews only returns rows with
+# status='pending'. By this step (after 6.6/7 auto-approve) all rows
+# are status='approved' and the endpoint shows count=0 — false negative.
+# Query the DB directly for ANY qa_engineer-authored row for this
+# correlation, regardless of status.
+final_qa_count=$(docker exec ai_team_postgres psql -U ai_team -d ai_team -t -A -c \
+    "SELECT count(*) FROM pending_reviews WHERE requesting_agent='qa_engineer' AND correlation_id='$CORRELATION';" \
+    2>/dev/null | tr -d '[:space:]' || echo 0)
 if [[ "$final_qa_count" -ge 1 ]]; then
-    ok "iter-24 CRITERION MET — qa_engineer pending_reviews count=$final_qa_count (4-iteration deferred row finally landed)"
+    ok "iter-24 CRITERION MET — qa_engineer pending_reviews count=$final_qa_count for correlation ${CORRELATION:0:8} (5-iteration deferred row finally landed)"
 else
-    printf "\033[1;31m✗ iter-24 CRITERION NOT MET — qa_engineer pending_reviews count=%s\033[0m\n" "$final_qa_count"
+    printf "\033[1;31m✗ iter-24 CRITERION NOT MET — qa_engineer pending_reviews count=%s for correlation %s\033[0m\n" "$final_qa_count" "${CORRELATION:0:8}"
 fi
 echo
-echo "--- Pending reviews (full list): ---"
+echo "--- Pending reviews (full list, all statuses): ---"
 uv run ai-team list-pending 2>/dev/null || true
 echo
 echo "--- Latest checkpoint digest: ---"
