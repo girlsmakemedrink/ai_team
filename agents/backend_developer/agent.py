@@ -14,6 +14,8 @@ response into an AgentMessage back to the Team Lead.
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -35,6 +37,50 @@ if TYPE_CHECKING:
 _log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+# iter-21: runtime tripwire. The TL prompt edit shipped in iter-20 makes TL
+# emit smaller Backend subtasks structurally (audit rows 305+306 in the
+# iter-20 demo), but LLM compliance on the soft "≤200 LOC" instruction is
+# imperfect — 1 of 2 subtasks still hit the 600s timeout. The pre-flight
+# check below catches obviously-too-large work BEFORE burning the LLM
+# turn (~$0.50 + 10 min saved per failure). TL's iter-21 re-decomposition
+# handler routes the resulting BLOCKED(task_too_large) back through a
+# self-targeted decomposition. See docs/iterations/iter_20_demo_report.md
+# §Caveat A and docs/iterations/iter_21.md Phase 1.
+_MAX_DESCRIPTION_CHARS = 1500
+_MAX_UNKNOWN_FILE_PATHS = 3
+_FILE_PATH_RE = re.compile(r"[A-Za-z][A-Za-z0-9_/.-]+\.[a-z]+")
+_AUTO_ROUTED_HINT = "[auto-routed"
+
+
+def _is_task_too_large(description: str, target_repo_root: Path) -> tuple[bool, str]:
+    """Pre-flight heuristic for the Backend tripwire.
+
+    Returns (True, diagnostic) when the description plausibly exceeds
+    ~200 LOC scope, (False, "") otherwise. Heuristics OR-combined:
+
+    - Description char count > 1500.
+    - >= 3 distinct file-path-shaped tokens that don't already exist on
+      disk under `target_repo_root`.
+
+    Thresholds are deliberately conservative — false negatives fall back
+    to the existing 600s timeout (iter-20 baseline). False positives
+    trigger TL's auto-hop re-decomposition, capped at one hop by the
+    anti-loop marker.
+    """
+    char_count = len(description)
+    if char_count > _MAX_DESCRIPTION_CHARS:
+        return True, f"description {char_count} chars > {_MAX_DESCRIPTION_CHARS} threshold"
+    tokens = set(_FILE_PATH_RE.findall(description))
+    unknown = sorted(t for t in tokens if not (target_repo_root / t).exists())
+    if len(unknown) >= _MAX_UNKNOWN_FILE_PATHS:
+        sample = ", ".join(unknown[:5])
+        return True, (
+            f"{len(unknown)} file-path tokens not on disk "
+            f"(>= {_MAX_UNKNOWN_FILE_PATHS} threshold): {sample}"
+        )
+    return False, ""
 
 
 BACKEND_REPORT_SCHEMA: dict[str, object] = {
@@ -136,6 +182,36 @@ class BackendDeveloperAgent(BaseAgent):
     async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
         if msg.message_type != MessageType.TASK_ASSIGNMENT:
             return []
+        if not isinstance(msg.payload, TaskAssignmentPayload):
+            return []
+        # iter-21: tripwire short-circuit BEFORE LLM invocation. See module
+        # docstring on _is_task_too_large for rationale.
+        target_root = Path(os.environ.get("AI_TEAM_REPO_ROOT", str(_REPO_ROOT)))
+        too_large, diag = _is_task_too_large(msg.payload.description, target_root)
+        if too_large:
+            already_routed = _AUTO_ROUTED_HINT in msg.payload.description.lower()
+            marker = "[auto-routed already] " if already_routed else ""
+            summary = (
+                f"{marker}task too large: {diag}\n\n"
+                f"original task description (first 800 chars):\n"
+                f"{msg.payload.description[:800]}"
+            )[:2_000]
+            self._log.info(
+                "backend.tripwire_blocked",
+                diag=diag,
+                char_count=len(msg.payload.description),
+                already_routed=already_routed,
+                correlation_id=str(msg.correlation_id),
+            )
+            return [
+                self._report_to_tl(
+                    msg,
+                    status=TaskStatus.BLOCKED,
+                    summary=summary,
+                    artifacts=[],
+                    blocked_on="task_too_large",
+                )
+            ]
         response = await self._llm.invoke(
             system_prompt=self.system_prompt(),
             user_message=self._user_message_for(msg),
@@ -156,6 +232,7 @@ class BackendDeveloperAgent(BaseAgent):
         status: TaskStatus,
         summary: str,
         artifacts: list[str],
+        blocked_on: str | None = None,
     ) -> AgentMessage:
         assert isinstance(incoming.payload, TaskAssignmentPayload)
         return AgentMessage(
@@ -170,5 +247,6 @@ class BackendDeveloperAgent(BaseAgent):
                 progress_pct=100 if status == TaskStatus.DONE else 0,
                 summary=summary,
                 artifacts=artifacts,
+                blocked_on=blocked_on,
             ),
         )
