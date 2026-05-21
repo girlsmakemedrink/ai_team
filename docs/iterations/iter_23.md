@@ -166,7 +166,23 @@ Per-run stats (`tools_used=[]` for all):
 `claude_code_headless.py`'s token extraction. Side-investigation,
 not blocking.)
 
-## Phase 2 — Python-side safety net (MANDATORY per Phase 1 evidence)
+## Phase 2 — Python-side safety net ✅ SHIPPED (3/3 e2e PASSED)
+
+**Result (2026-05-21)**: `QAEngineerAgent.__init__` now accepts
+`session_factory`; `handle()` inspects `response.tools_used` after
+the LLM turn; safety net INSERTs the `pending_reviews` row directly
+via `PendingReview` when `mcp__ai_team_tasks__request_human_review`
+is absent. Plumbed via `apps/api/main.py:93`.
+
+End-to-end real-LLM validation (3 parametrized runs against
+testcontainers Postgres) — **3/3 PASSED**. In every run the LLM
+skipped the tool (`qa.safety_net.row_inserted reason=
+llm_skipped_request_human_review_tool` structlog warning fired),
+and the safety net wrote the row deterministically. Total cost
+$0.10, total wall-clock 220s.
+
+12 QA unit tests (8 existing + 4 safety net), 438 unit suite,
+50 integration suite, ruff/mypy/bandit/smoke-llm all green.
 
 **Design**: in `QAEngineerAgent.build_outputs`, after producing the
 `task_report`, inspect `response.tools_used`. If no entry matches
