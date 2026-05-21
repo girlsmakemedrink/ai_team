@@ -12,7 +12,7 @@ tools, structured-response unpacking, failure paths.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -30,8 +30,7 @@ from core.messaging.schemas import (
     TaskStatus,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
+_REPO_ROOT_FOR_PROMPT = Path(__file__).resolve().parents[2]
 
 
 class _StubLLM:
@@ -280,3 +279,91 @@ async def test_handle_blocked_summary_echoes_auto_route_marker(
     report = outputs[0]
     assert isinstance(report.payload, TaskReportPayload)
     assert "auto-routed already" in report.payload.summary.lower()
+
+
+# ---------- iter-22 LLM-self-eject tests ----------
+#
+# The Python tripwire (iter-21) is now defense-in-depth. The primary
+# defense is the LLM emitting status='blocked' on turn 1 from its
+# Scope pre-flight. See iter_22.md Phase 1.
+
+
+def _backend_blocked_response(
+    *,
+    blocked_on: str = "task_too_large",
+    summary: str = "Scope pre-flight: 3 files / 250 LOC estimated; emitting BLOCKED.",
+) -> LLMResponse:
+    structured = {
+        "branch": "",
+        "summary": summary,
+        "files_written": [],
+        "tests_passed": False,
+        "pr_url": "",
+        "status": "blocked",
+        "blocked_on": blocked_on,
+    }
+    return LLMResponse(
+        text=json.dumps(structured),
+        structured=structured,
+        tools_used=[],
+        session_id="be-blocked-sess",
+        tokens=TokensUsage(input=50, output=80, model="claude-sonnet-4-6"),
+        cost_estimate_cents=3,
+        duration_ms=4_000,
+        validated_against_schema=True,
+        raw={},
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_emits_blocked_when_llm_self_ejects() -> None:
+    agent = BackendDeveloperAgent(llm=_StubLLM(_backend_blocked_response()))
+    outputs = await agent.handle(_task_assignment())
+
+    assert len(outputs) == 1
+    report = outputs[0]
+    assert isinstance(report.payload, TaskReportPayload)
+    assert report.payload.status == TaskStatus.BLOCKED
+    assert report.payload.blocked_on == "task_too_large"
+    assert "scope" in report.payload.summary.lower()
+
+
+@pytest.mark.asyncio
+async def test_handle_self_eject_passes_blocked_on_through() -> None:
+    agent = BackendDeveloperAgent(
+        llm=_StubLLM(_backend_blocked_response(blocked_on="custom_reason"))
+    )
+    outputs = await agent.handle(_task_assignment())
+
+    report = outputs[0]
+    assert isinstance(report.payload, TaskReportPayload)
+    assert report.payload.status == TaskStatus.BLOCKED
+    assert report.payload.blocked_on == "custom_reason"
+
+
+@pytest.mark.asyncio
+async def test_handle_legacy_tests_passed_path_still_works() -> None:
+    """Backward compat: LLM that returns the old schema (no `status`
+    field) is mapped to DONE/FAILED via `tests_passed` as before."""
+    agent = BackendDeveloperAgent(llm=_StubLLM(_backend_response()))
+    outputs = await agent.handle(_task_assignment())
+
+    report = outputs[0]
+    assert isinstance(report.payload, TaskReportPayload)
+    assert report.payload.status == TaskStatus.DONE
+
+
+def test_backend_prompt_teaches_scope_preflight() -> None:
+    prompt_path = _REPO_ROOT_FOR_PROMPT / "prompts" / "backend_developer.md"
+    text = prompt_path.read_text()
+    assert "Scope pre-flight" in text
+    assert "task_too_large" in text
+    # Allow ASCII or unicode comparator in the LOC threshold:
+    assert "200 LOC" in text
+    # File count threshold (any phrasing):
+    assert (
+        ">2 files" in text
+        or "> 2 files" in text
+        or "more than 2 files" in text.lower()
+        or "2 files" in text
+    )
