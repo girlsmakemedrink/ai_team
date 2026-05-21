@@ -369,13 +369,15 @@ def test_backend_prompt_teaches_scope_preflight() -> None:
     )
 
 
-def test_backend_schema_constrains_blocked_on_enum() -> None:
-    """iter-23: BACKEND_REPORT_SCHEMA's blocked_on field is an enum.
+def test_backend_schema_blocked_on_permissive_string_or_null() -> None:
+    """iter-23: BACKEND_REPORT_SCHEMA's blocked_on is `string | null`.
 
-    Demo run #1 caught the LLM emitting a 200-char free-form sentence
-    in blocked_on, which broke TL's routing match. The schema must
-    force the LLM to use a canonical routing token — elaboration
-    belongs in `summary`.
+    Originally (iter-23 hot-fix attempt #1) constrained to an enum,
+    but demo run #2 showed Backend's claude -p subprocess exhausting
+    its $2.50 budget cap on what looked like a --json-schema retry
+    loop. Reverted to permissive type; the routing defense lives in
+    TL's substring matcher + the Backend prompt's literal-token
+    instruction.
     """
     from agents.backend_developer.agent import BACKEND_REPORT_SCHEMA
 
@@ -383,12 +385,10 @@ def test_backend_schema_constrains_blocked_on_enum() -> None:
     assert isinstance(props, dict)
     blocked_on_prop = props["blocked_on"]
     assert isinstance(blocked_on_prop, dict)
-    assert "enum" in blocked_on_prop, "blocked_on must be enum-constrained"
-    enum_values = set(blocked_on_prop["enum"])
-    assert "task_too_large" in enum_values
-    assert "budget" in enum_values
-    assert "mcp_unhealthy" in enum_values
-    assert None in enum_values, "must permit null when status != blocked"
+    assert blocked_on_prop.get("type") == ["string", "null"]
+    # No enum: enum constraint suspected of causing budget burns in
+    # iter-23 demo run #2 (correlation c941d96a-b9ee-4575-aeb6-812f297dd8e8).
+    assert "enum" not in blocked_on_prop
 
 
 def test_backend_prompt_mandates_literal_blocked_on_token() -> None:
