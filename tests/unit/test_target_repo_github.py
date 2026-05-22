@@ -161,3 +161,23 @@ async def test_prepare_for_task_raises_on_fetch_failure(tmp_path: Path) -> None:
         mock_run.return_value = (1, "", "fatal: unable to access remote")
         with pytest.raises(GitCommandError, match="failed to fetch origin/main"):
             await repo.prepare_for_task()
+
+
+@pytest.mark.asyncio
+async def test_prepare_for_task_raises_on_dirty_workspace(tmp_path: Path) -> None:
+    repo = GitHubTargetRepo("girlsmakemedrink/telegram-tech-publisher", workspaces_dir=tmp_path)
+    repo.root.mkdir(parents=True)
+    (repo.root / ".git").mkdir()
+
+    with patch("core.target_repo.github._run", new_callable=AsyncMock) as mock_run:
+        mock_run.side_effect = [
+            (0, "", ""),  # fetch ok
+            (0, " M src/foo.py\n?? new.txt\n", ""),  # status --porcelain non-empty
+        ]
+        with pytest.raises(GitCommandError, match="uncommitted changes"):
+            await repo.prepare_for_task()
+
+    # Verify checkout and merge were NEVER attempted.
+    called_subcommands = [c.args[1] for c in mock_run.call_args_list]
+    assert "checkout" not in called_subcommands
+    assert "merge" not in called_subcommands
