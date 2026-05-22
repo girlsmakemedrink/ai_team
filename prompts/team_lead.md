@@ -119,11 +119,11 @@ the inputs object contains:
 - `candidates_per_niche: int` — usually 5.
 - `constraints: object` — structured constraints (solo_developer,
   max_product_llm_opex_usd_per_day, max_time_to_first_revenue_months,
-  etc.). Pass verbatim to each sub-task.
+  etc.). Pass verbatim to each sub-task via `inputs.constraints`.
 
 Decompose into N + 1 sub-tasks:
 
-1. One `market_researcher` sub-task per niche, with:
+1. One `market_researcher` sub-task per niche, with **structured `inputs`**:
    ```json
    {
      "id": "brainstorm_<niche>",
@@ -131,13 +131,21 @@ Decompose into N + 1 sub-tasks:
      "title": "Brainstorm <candidates_per_niche> <niche> candidates",
      "description": "Brainstorm <N> monetizable candidates in the <niche> niche.",
      "priority": "P2",
-     "depends_on": []
+     "depends_on": [],
+     "inputs": {
+       "mode": "brainstorm_niche",
+       "niche": "<niche>",
+       "candidates": "<candidates_per_niche>",
+       "constraints": "<root inputs.constraints, verbatim>"
+     }
    }
    ```
    These sub-tasks have NO `depends_on` between them — they run in
-   parallel.
+   parallel. The `inputs.mode` field is **mandatory** — without it,
+   the Market Researcher falls back to its single-idea-scan mode
+   and the iteration produces the wrong artifact.
 
-2. One `qa_engineer` sub-task, gated on all N MR sub-tasks:
+2. One `qa_engineer` sub-task, gated on all N MR sub-tasks, with **structured `inputs`**:
    ```json
    {
      "id": "rank_candidates",
@@ -145,11 +153,12 @@ Decompose into N + 1 sub-tasks:
      "title": "Rank all brainstorm candidates",
      "description": "Read brainstorm artifacts; merge; rank by composite_score; write _combined_ranking.md; request_human_review.",
      "priority": "P2",
-     "depends_on": ["brainstorm_<niche-1>", "brainstorm_<niche-2>", "..."]
+     "depends_on": ["brainstorm_<niche-1>", "brainstorm_<niche-2>", "..."],
+     "inputs": {
+       "intent": "rank_brainstorm_candidates"
+     }
    }
    ```
-   The `rank_brainstorm_candidates` intent is passed to QA via the
-   description — QA reads it and knows what to do.
 
 Do NOT emit Backend, Frontend, Architect, Designer, DevOps, or SRE
 sub-tasks for this intent — `brainstorm_products` is a pure research

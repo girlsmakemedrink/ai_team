@@ -100,6 +100,11 @@ DECOMPOSITION_SCHEMA: dict[str, object] = {
                         "items": {"type": "string", "pattern": _SUBTASK_ID_PATTERN},
                         "default": [],
                     },
+                    "inputs": {
+                        "type": "object",
+                        "default": {},
+                        "additionalProperties": True,
+                    },
                 },
             },
         },
@@ -192,6 +197,7 @@ class TeamLeadAgent(BaseAgent):
                         title=str(sub["title"])[:200],
                         description=str(sub["description"])[:10_000],
                         target_repo=incoming.payload.target_repo,
+                        inputs=sub.get("inputs") or {},
                     ),
                     metadata={
                         "subtask_id": slug,
