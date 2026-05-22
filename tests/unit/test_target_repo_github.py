@@ -92,6 +92,7 @@ async def test_ensure_local_clone_clones_when_missing(tmp_path: Path) -> None:
     assert result == repo.root
     assert (repo.root / ".git").is_dir()
     # First call invokes `git clone <ssh_url> <dest>`.
+    assert mock_run.await_args is not None
     args = mock_run.await_args.args
     assert args[0] == "git"
     assert args[1] == "clone"
@@ -108,6 +109,7 @@ async def test_ensure_local_clone_fetches_when_already_cloned(tmp_path: Path) ->
         mock_run.return_value = (0, "", "")
         result = await repo.ensure_local_clone()
     assert result == repo.root
+    assert mock_run.await_args is not None
     args = mock_run.await_args.args
     assert args[0] == "git"
     assert args[1] == "fetch"
