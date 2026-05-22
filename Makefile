@@ -3,7 +3,7 @@
         test test-unit test-integration test-smoke test-real-llm \
         lint typecheck format format-check fix sec \
         migrate alembic-rev \
-        smoke-llm smoke-github-target-repo demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 demo-iter-5 demo-iter-6 demo-iter-7 demo-iter-8 demo-iter-9 demo-iter-10 demo-iter-11 demo-iter-12 demo-iter-13 demo-iter-14 demo-iter-15 demo-iter-16 demo-iter-17 demo-iter-18 demo-iter-19 demo-iter-20 demo-iter-21 demo-iter-22 demo-iter-23 demo-iter-24 demo-iter-25 \
+        smoke-llm smoke-github-target-repo smoke-cross-repo-dispatch demo demo-iter-0 demo-iter-1 demo-iter-2 demo-iter-3 demo-iter-4 demo-iter-5 demo-iter-6 demo-iter-7 demo-iter-8 demo-iter-9 demo-iter-10 demo-iter-11 demo-iter-12 demo-iter-13 demo-iter-14 demo-iter-15 demo-iter-16 demo-iter-17 demo-iter-18 demo-iter-19 demo-iter-20 demo-iter-21 demo-iter-22 demo-iter-23 demo-iter-24 demo-iter-25 \
         clean
 
 help: ## Show available targets
@@ -98,6 +98,9 @@ smoke-llm: ## Validate `claude -p` substrate (ADR-008)
 
 smoke-github-target-repo: ## iter-28 smoke — clone product repo via GitHubTargetRepo + status/lint/tests
 	bash scripts/smoke_github_target_repo.sh
+
+smoke-cross-repo-dispatch: ## iter-29c smoke — dispatcher → BaseAgent threads cwd + AI_TEAM_REPO_ROOT (mocked LLM, real clone)
+	bash scripts/smoke_cross_repo_dispatch.sh
 
 demo: demo-iter-25 ## Alias for the current iteration's demo
 

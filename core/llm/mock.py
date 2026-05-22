@@ -54,9 +54,13 @@ class MockLLMClient:
         json_schema: dict[str, Any] | None = None,
         max_budget_usd: float | None = None,
         env: dict[str, str] | None = None,
+        cwd: str | None = None,
     ) -> LLMResponse:
         key = self._make_key(system_prompt, user_message)
-        self._calls.append({"key": key, "model": model})
+        entry: dict[str, str] = {"key": key, "model": model}
+        if cwd is not None:
+            entry["cwd"] = cwd
+        self._calls.append(entry)
 
         fixture_path = self._fixture_dir / f"{key}.json"
         if not fixture_path.exists():

@@ -8,6 +8,7 @@ agent — keeps audit chain deterministic).
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -31,6 +32,7 @@ from core.observability.metrics import (
     agent_message_processing_duration,
 )
 from core.security.hmac_signer import HMACSigner, InvalidSignatureError
+from core.target_repo.registry import resolve_target_repo
 
 if TYPE_CHECKING:
     from agents._base import BaseAgent
@@ -40,6 +42,8 @@ if TYPE_CHECKING:
     from core.persistence.task_state import TaskStateReducer
 
 _log = structlog.get_logger(__name__)
+
+_AI_TEAM_ROOT_DEFAULT = Path(__file__).resolve().parents[2]
 
 
 class AgentDispatcher:
@@ -56,6 +60,7 @@ class AgentDispatcher:
         iteration: int | None = None,
         hold_queue: HoldQueue | None = None,
         task_state: TaskStateReducer | None = None,
+        ai_team_root: Path | None = None,
     ) -> None:
         self._bus = bus
         self._feed = feed
@@ -69,6 +74,7 @@ class AgentDispatcher:
         # the bookkeeping (used by tests that don't care about the rollup
         # and by environments that haven't set up the tasks table yet).
         self._task_state = task_state
+        self._ai_team_root = ai_team_root or _AI_TEAM_ROOT_DEFAULT
         self._shutdown = asyncio.Event()
 
     async def run(self) -> None:
@@ -132,6 +138,11 @@ class AgentDispatcher:
                 agent=agent.role.value, message_type=msg.message_type.value
             ).time():
                 try:
+                    # iter-29c: resolve payload.target_repo into a
+                    # workspace path and stash on msg.metadata so
+                    # BaseAgent injects AI_TEAM_REPO_ROOT + cwd. Failures
+                    # fall through to the existing _synthesise_failed_report.
+                    await self._maybe_resolve_target_repo_workspace(msg)
                     outputs = await agent.handle(msg)
                 except Exception as exc:
                     _log.exception(
@@ -193,6 +204,28 @@ class AgentDispatcher:
             await self._bus.ack(agent.role, entry_id)
         finally:
             clear_correlation_id(token)
+
+    async def _maybe_resolve_target_repo_workspace(self, msg: AgentMessage) -> None:
+        """Resolve payload.target_repo and stash workspace path on
+        msg.metadata['target_repo_workspace'] for BaseAgent to read.
+
+        No-op when:
+        - msg is not a TaskAssignment;
+        - payload.target_repo is None (self-hosting path).
+
+        Raises whatever `resolve_target_repo` or `ensure_local_clone`
+        raises (ValueError, GitCommandError, etc.). `_handle_one`'s
+        outer try/except catches and synthesises a FAILED report via
+        the existing iter-5 substrate.
+        """
+        if not isinstance(msg.payload, TaskAssignmentPayload):
+            return
+        identifier = msg.payload.target_repo
+        if not identifier:
+            return
+        repo = resolve_target_repo(identifier, ai_team_root=self._ai_team_root)
+        workspace = await repo.ensure_local_clone()
+        msg.metadata["target_repo_workspace"] = str(workspace)
 
     async def _maybe_record_task_state(self, msg: AgentMessage) -> None:
         """Forward task lifecycle events to the TaskStateReducer if wired."""
