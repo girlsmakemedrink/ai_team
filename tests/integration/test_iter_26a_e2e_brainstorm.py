@@ -40,6 +40,8 @@ from core.persistence.task_state import TaskStateReducer
 from core.security.hmac_signer import HMACSigner
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 pytestmark = pytest.mark.integration
@@ -257,6 +259,8 @@ async def test_brainstorm_products_full_chain(
     redis_url: str,
     session_factory: async_sessionmaker[AsyncSession],
     db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Submit one root brainstorm_products task.
 
@@ -271,6 +275,20 @@ async def test_brainstorm_products_full_chain(
     doesn't actually call the MCP tool).
     """
     _ = db_session  # ensures _alembic_upgrade ran
+
+    # Redirect MR + QA file outputs to tmp_path so the test doesn't pollute
+    # the actual repo's docs/products/ directory. Also redirect _REPO_ROOT
+    # because QA's _build_rank_outputs computes paths relative to it.
+    monkeypatch.setattr("agents.market_researcher.agent._REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "agents.market_researcher.agent._BRAINSTORM_DIR",
+        tmp_path / "docs" / "products" / "_candidates",
+    )
+    monkeypatch.setattr("agents.qa_engineer.agent._REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "agents.qa_engineer.agent._RANKING_DIR",
+        tmp_path / "docs" / "products" / "_candidates",
+    )
 
     bus = MessageBus.from_url(redis_url)
     feed = FeedPublisher.from_url(redis_url, db_session_factory=session_factory)
