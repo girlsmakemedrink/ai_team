@@ -77,9 +77,8 @@ class _MinimalRepo(TargetRepo):
 async def test_prepare_for_task_default_is_noop(tmp_path: Path) -> None:
     repo = _MinimalRepo()
     repo.root = tmp_path
-    # Should not raise, returns None.
-    result = await repo.prepare_for_task()
-    assert result is None
+    # Should not raise.
+    await repo.prepare_for_task()
 
 
 @pytest.mark.asyncio
@@ -87,8 +86,7 @@ async def test_self_bootstrap_inherits_default_prepare_for_task(tmp_path: Path) 
     from core.target_repo.self_bootstrap import SelfBootstrapTargetRepo
 
     repo = SelfBootstrapTargetRepo(root=tmp_path)
-    result = await repo.prepare_for_task()
-    assert result is None
+    await repo.prepare_for_task()
 
 
 @pytest.mark.asyncio
@@ -97,5 +95,4 @@ async def test_in_repo_example_inherits_default_prepare_for_task(tmp_path: Path)
 
     # Use the same constructor shape as existing InRepoExample tests.
     repo = InRepoExampleTargetRepo(root=tmp_path, name="idea_validator")
-    result = await repo.prepare_for_task()
-    assert result is None
+    await repo.prepare_for_task()
