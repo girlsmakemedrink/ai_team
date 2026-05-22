@@ -208,12 +208,27 @@ async def _run_watch(
 @click.option("--title", required=True)
 @click.option("--description", required=True)
 @click.option("--target-repo", default=None, help="Override TARGET_REPO (default: ai_team itself).")
+@click.option(
+    "--inputs-json",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, readable=True),
+    help="Path to a JSON file passed as TaskAssignmentPayload.inputs.",
+)
 @click.pass_context
-def submit(ctx: click.Context, title: str, description: str, target_repo: str | None) -> None:
+def submit(
+    ctx: click.Context,
+    title: str,
+    description: str,
+    target_repo: str | None,
+    inputs_json: str | None,
+) -> None:
     """Submit a new task to the Team Lead."""
     body: dict[str, Any] = {"title": title, "description": description}
     if target_repo:
         body["target_repo"] = target_repo
+    if inputs_json:
+        with open(inputs_json) as f:
+            body["inputs"] = json.load(f)
 
     resp = httpx.post(
         f"{_api_base(ctx)}/api/tasks",
@@ -325,6 +340,77 @@ def _resolve_review(ctx: click.Context, review_id: UUID, verb: str, comment: str
     # API returns proper past tense ("approved" / "rejected"); fall back to verb+ed.
     status_str = resp.json().get("status", f"{verb}ed")
     console.print(f"[green]Review {review_id} {status_str}.[/]")
+
+
+@cli.command(name="brainstorm-products")
+@click.option(
+    "--niches",
+    required=True,
+    help="Comma-separated niches (e.g. dev_tools,b2b_smb,creator_tools).",
+)
+@click.option(
+    "--candidates-per-niche",
+    default=5,
+    type=int,
+    help="Number of candidates per niche (default: 5).",
+)
+@click.option(
+    "--constraints-json",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, readable=True),
+    help="Path to JSON file with monetization/budget constraints.",
+)
+@click.pass_context
+def brainstorm_products(
+    ctx: click.Context,
+    niches: str,
+    candidates_per_niche: int,
+    constraints_json: str,
+) -> None:
+    """Brainstorm monetizable product candidates across niches."""
+    niche_list = [n.strip() for n in niches.split(",") if n.strip()]
+    if not niche_list:
+        console.print("[red]At least one niche required.[/]")
+        sys.exit(1)
+
+    with open(constraints_json) as f:
+        constraints = json.load(f)
+
+    body: dict[str, Any] = {
+        "title": "Brainstorm monetizable product candidates",
+        "description": (
+            f"Decompose into {len(niche_list)} parallel market_researcher "
+            f"sub-tasks (one per niche), then route a qa_engineer sub-task "
+            f"to merge and rank. Constraints in inputs.constraints."
+        ),
+        "inputs": {
+            "intent": "brainstorm_products",
+            "niches": niche_list,
+            "candidates_per_niche": candidates_per_niche,
+            "constraints": constraints,
+        },
+    }
+    resp = httpx.post(
+        f"{_api_base(ctx)}/api/tasks",
+        json=body,
+        headers=_token_header(ctx),
+        timeout=30.0,
+    )
+    if resp.status_code != 200:
+        console.print(f"[red]Failed: {resp.status_code} {resp.text}[/]")
+        sys.exit(1)
+    data = resp.json()
+    console.print(
+        Panel(
+            f"[bold]Brainstorm queued.[/]\n"
+            f"  task_id:        {data['task_id']}\n"
+            f"  correlation_id: {data['correlation_id']}\n"
+            f"  niches:         {', '.join(niche_list)}\n"
+            f"  watch:          ai-team watch --correlation {data['correlation_id']}",
+            title="brainstorm-products submitted",
+            style="green",
+        )
+    )
 
 
 @cli.command()

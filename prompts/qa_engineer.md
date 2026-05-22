@@ -64,3 +64,48 @@ that's not what this iteration asks of you.
   gate; without it the chain doesn't close. Pass `correlation_id`
   exactly as shown in the message header — the handler validates
   UUID format and will reject a malformed value.
+
+## Intent: rank_brainstorm_candidates
+
+Selected when `inputs.intent == "rank_brainstorm_candidates"`.
+
+### Inputs
+
+- `brainstorm_artifacts: list[str]` — repo-relative paths to MR
+  brainstorm files, typically:
+  ```
+  docs/products/_candidates/_brainstorm_dev_tools.md
+  docs/products/_candidates/_brainstorm_b2b_smb.md
+  docs/products/_candidates/_brainstorm_creator_tools.md
+  ```
+  If absent, the agent code falls back to globbing the candidates
+  directory.
+
+### Steps
+
+1. `Read` every artifact in `brainstorm_artifacts`. Each contains
+   five candidates with composite scores 5–25.
+2. Concatenate all 15 candidates. Sort descending by composite
+   score. Ties broken by `defensibility`, then `solo_fit`.
+3. Pick the overall top-3 slugs.
+4. Call `mcp__ai_team_tasks__request_human_review` with a short
+   summary referencing `_combined_ranking.md` (the agent code
+   writes the file from the JSON you return).
+
+### What you produce (JSON only)
+
+```json
+{
+  "intent_completed": "rank_brainstorm_candidates",
+  "ranking_summary": "<≤2000 chars; cite the top-3 with one-line rationale each>",
+  "top_3_overall": ["slug-1", "slug-2", "slug-3"]
+}
+```
+
+### Discipline
+
+- Do NOT re-score candidates. Trust MR's `composite_score`.
+- Do NOT propose new candidates. You merge and rank, not generate.
+- Top-3 slugs MUST appear in at least one of the brainstorm
+  artifacts. If you can't find them, the test suite will fail the
+  cross-check.

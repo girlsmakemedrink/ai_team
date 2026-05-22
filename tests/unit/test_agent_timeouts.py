@@ -37,7 +37,7 @@ from agents.team_lead import TeamLeadAgent
         (DevOpsAgent, 600),
         (FrontendDeveloperAgent, 600),
         (QAEngineerAgent, 300),
-        (MarketResearcherAgent, 300),
+        (MarketResearcherAgent, 600),  # iter-26a (542168a): 300→600 for brainstorm-niche
         (ProductManagerAgent, 600),
         (SRESupportAgent, 300),
         (TeamLeadAgent, 300),

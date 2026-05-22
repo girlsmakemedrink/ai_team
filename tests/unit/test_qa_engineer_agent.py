@@ -95,9 +95,15 @@ def test_allowed_tools_no_raw_bash_or_write() -> None:
     assert not overlap
 
 
-def test_mcp_env_scopes_to_tests_dir() -> None:
-    """QA only writes to tests/ (regression cases). Enforced at MCP spawn."""
-    assert QAEngineerAgent.mcp_env["AI_TEAM_PATH_PREFIXES"] == "tests/"
+def test_mcp_env_scopes_to_tests_and_candidates_dir() -> None:
+    """QA writes to tests/ (regression cases) and docs/products/_candidates (ranking).
+
+    iter-26a: expanded from tests/ only to include the candidates dir so the
+    rank_brainstorm_candidates intent can write _combined_ranking.md.
+    """
+    prefixes = QAEngineerAgent.mcp_env["AI_TEAM_PATH_PREFIXES"]
+    assert "tests/" in prefixes
+    assert "docs/products/_candidates" in prefixes
 
 
 def test_allowed_tools_includes_run_shell() -> None:

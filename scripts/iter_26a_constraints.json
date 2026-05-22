@@ -1,0 +1,8 @@
+{
+  "solo_developer": true,
+  "max_product_llm_opex_usd_per_day": 3,
+  "monetization_preferences": ["subscription", "per-seat", "usage"],
+  "max_time_to_first_revenue_months": 6,
+  "defensibility_floor": "minimal moat acceptable; user-distribution moat ok",
+  "owner_expertise_hint": "Python backend; AI/agent systems; Russian-speaking; comfortable with technical content"
+}
