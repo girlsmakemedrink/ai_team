@@ -63,6 +63,14 @@ def test_four_candidates_rejected() -> None:
         jsonschema.validate(bad, BRAINSTORM_NICHE_SCHEMA)
 
 
+def test_six_candidates_rejected() -> None:
+    bad = _valid_brainstorm()
+    extra = dict(bad["candidates"][0], slug="cand-5")
+    bad["candidates"] = [*bad["candidates"], extra]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(bad, BRAINSTORM_NICHE_SCHEMA)
+
+
 def test_composite_score_out_of_range_rejected() -> None:
     bad = _valid_brainstorm()
     bad["candidates"][0]["composite_score"] = 26
