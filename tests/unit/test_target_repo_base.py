@@ -41,3 +41,60 @@ def test_subclass_must_implement_abstract_methods() -> None:
 
     with pytest.raises(TypeError):
         Incomplete()  # type: ignore[abstract]
+
+
+class _MinimalRepo(TargetRepo):
+    """Implements the abstract surface with placeholders; only here to
+    instantiate TargetRepo for testing the concrete no-op method."""
+
+    async def ensure_local_clone(self) -> Path:  # type: ignore[override]
+        return self.root
+
+    async def checkout(self, branch: str, *, base: str | None = None) -> None:  # type: ignore[override]
+        return None
+
+    async def stage_and_commit(self, paths, message, author):  # type: ignore[override]
+        return "sha"
+
+    async def push(self, branch: str) -> None:  # type: ignore[override]
+        return None
+
+    async def open_pr(self, *, head, base, title, body):  # type: ignore[override]
+        raise NotImplementedError
+
+    async def run_tests(self, command=None):  # type: ignore[override]
+        raise NotImplementedError
+
+    async def run_linter(self):  # type: ignore[override]
+        raise NotImplementedError
+
+    async def status(self):  # type: ignore[override]
+        raise NotImplementedError
+
+
+@pytest.mark.asyncio
+async def test_prepare_for_task_default_is_noop(tmp_path: Path) -> None:
+    repo = _MinimalRepo()
+    repo.root = tmp_path
+    # Should not raise, returns None.
+    result = await repo.prepare_for_task()
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_self_bootstrap_inherits_default_prepare_for_task(tmp_path: Path) -> None:
+    from core.target_repo.self_bootstrap import SelfBootstrapTargetRepo
+
+    repo = SelfBootstrapTargetRepo(root=tmp_path)
+    result = await repo.prepare_for_task()
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_in_repo_example_inherits_default_prepare_for_task(tmp_path: Path) -> None:
+    from core.target_repo.in_repo_example import InRepoExampleTargetRepo
+
+    # Use the same constructor shape as existing InRepoExample tests.
+    repo = InRepoExampleTargetRepo(root=tmp_path, name="idea_validator")
+    result = await repo.prepare_for_task()
+    assert result is None
