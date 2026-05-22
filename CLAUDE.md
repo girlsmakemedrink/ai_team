@@ -335,3 +335,10 @@ the product repo holds PRD + ADRs + code.
   Added in iter-29c PR 1 (`8015123`).
 - **Commit small, conventional, push frequently.** Squash-merge collapses
   on merge.
+- **Dev extras require `uv sync --extra dev --all-groups`.** Any repo with
+  PEP 621 `[project.optional-dependencies].dev` (ai_team does; product
+  repos may) needs that flag — bare `uv sync` skips those extras and
+  leaves `respx`, `pre-commit`, etc. uninstalled.
+- **`pending_reviews` rows are produced by the QA Engineer agent only.**
+  Chains that legitimately skip QA (e.g. docs-only TL → DevOps) will not
+  create a review record — that is by design, not a missing wire.
