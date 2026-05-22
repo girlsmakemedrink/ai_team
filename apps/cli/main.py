@@ -453,7 +453,7 @@ def brainstorm_products(
 )
 @click.option(
     "--constraints-json",
-    type=click.Path(exists=True, dir_okay=False),
+    type=click.Path(exists=True, dir_okay=False, readable=True),
     default="scripts/iter_26b_constraints.json",
     show_default=True,
     help="Owner-profile + budget envelope JSON.",
@@ -481,7 +481,11 @@ def validate_product(
 
     try:
         constraints = json.loads(Path(constraints_json).read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+        if not isinstance(constraints, dict):
+            raise ValueError(
+                f"constraints JSON must be a JSON object, got {type(constraints).__name__}"
+            )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         console.print(f"[red]Constraints JSON: {exc}[/]")
         sys.exit(1)
 

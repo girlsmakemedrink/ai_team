@@ -138,3 +138,26 @@ def test_validate_product_rejects_unknown_slug(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "not found" in result.output.lower()
+
+
+def test_validate_product_rejects_constraints_that_arent_dict(tmp_path: Path) -> None:
+    brainstorm = _write_brainstorm(tmp_path)
+    bad_constraints = tmp_path / "bad_constraints.json"
+    bad_constraints.write_text(json.dumps([1, 2, 3]))  # valid JSON, not a dict
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "validate-product",
+            "--slug",
+            "telegram-tech-publisher",
+            "--candidate-file",
+            str(brainstorm),
+            "--constraints-json",
+            str(bad_constraints),
+        ],
+        env={"OWNER_TOKEN": "test-token"},
+    )
+    assert result.exit_code != 0
+    assert "constraints json" in result.output.lower()
+    assert "object" in result.output.lower() or "dict" in result.output.lower()
