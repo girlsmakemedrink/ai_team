@@ -229,7 +229,14 @@ prompts/<role>.md # system prompts per agent (also referenced by class)
 tools/mcp_servers/    # ai-team-bus and ai-team-tasks MCP stubs (iter-2)
 docs/adr/             # ADRs 0001..0009 (do not skip these)
 docs/iterations/      # iter_N.md plan + iter_N_retro.md
-docs/sandbox/         # idea_validator_spec.md
+docs/sandbox/         # idea_validator_spec.md (training-task surface)
+docs/products/_candidates/  # iter-26a+: brainstormed product candidates
+                            # from MR. Separate surface from
+                            # docs/sandbox/ideas/ (sandbox = team
+                            # training; products = real candidate
+                            # pool). _combined_ranking.md is QA's
+                            # merged shortlist; owner picks top-3 in
+                            # the pending_review approval comment.
 infra/docker-compose.yml
 scripts/demo_iter_1.sh
 ```
