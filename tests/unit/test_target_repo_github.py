@@ -124,3 +124,40 @@ async def test_ensure_local_clone_raises_on_clone_failure(tmp_path: Path) -> Non
         mock_run.return_value = (128, "", "fatal: repo not found")
         with pytest.raises(GitCommandError, match="gh repo clone failed"):
             await repo.ensure_local_clone()
+
+
+@pytest.mark.asyncio
+async def test_prepare_for_task_fetches_origin_main(tmp_path: Path) -> None:
+    repo = GitHubTargetRepo("girlsmakemedrink/telegram-tech-publisher", workspaces_dir=tmp_path)
+    repo.root.mkdir(parents=True)
+    (repo.root / ".git").mkdir()
+
+    with patch("core.target_repo.github._run", new_callable=AsyncMock) as mock_run:
+        # fetch ok, status clean, checkout ok, merge ok
+        mock_run.side_effect = [
+            (0, "", ""),  # fetch
+            (0, "", ""),  # status --porcelain (empty == clean)
+            (0, "", ""),  # checkout main
+            (0, "", ""),  # merge --ff-only origin/main
+        ]
+        await repo.prepare_for_task()
+
+    # First call must be `git fetch origin main`.
+    first_call = mock_run.call_args_list[0]
+    assert first_call.args[0] == "git"
+    assert first_call.args[1] == "fetch"
+    assert first_call.args[2] == "origin"
+    assert first_call.args[3] == "main"
+    assert first_call.kwargs["cwd"] == repo.root
+
+
+@pytest.mark.asyncio
+async def test_prepare_for_task_raises_on_fetch_failure(tmp_path: Path) -> None:
+    repo = GitHubTargetRepo("girlsmakemedrink/telegram-tech-publisher", workspaces_dir=tmp_path)
+    repo.root.mkdir(parents=True)
+    (repo.root / ".git").mkdir()
+
+    with patch("core.target_repo.github._run", new_callable=AsyncMock) as mock_run:
+        mock_run.return_value = (1, "", "fatal: unable to access remote")
+        with pytest.raises(GitCommandError, match="failed to fetch origin/main"):
+            await repo.prepare_for_task()
