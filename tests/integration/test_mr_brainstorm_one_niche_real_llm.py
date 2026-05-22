@@ -45,7 +45,8 @@ if TYPE_CHECKING:
 @pytest.mark.real_llm
 @pytest.mark.asyncio
 async def test_mr_brainstorm_dev_tools_real_llm(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Real `claude -p` smoke — 5 dev_tools candidates."""
     monkeypatch.setattr("agents.market_researcher.agent._REPO_ROOT", tmp_path)
@@ -89,16 +90,12 @@ async def test_mr_brainstorm_dev_tools_real_llm(
 
     assert outputs, "MR returned no outputs"
     report = outputs[0].payload
-    assert report.status == TaskStatus.DONE, (
-        f"expected DONE, got {report.status}: {report.summary}"
+    assert report.status == TaskStatus.DONE, f"expected DONE, got {report.status}: {report.summary}"
+    assert any("_brainstorm_dev_tools.md" in a for a in report.artifacts), (
+        f"missing brainstorm artifact path; got {report.artifacts}"
     )
-    assert any(
-        "_brainstorm_dev_tools.md" in a for a in report.artifacts
-    ), f"missing brainstorm artifact path; got {report.artifacts}"
 
-    written = (
-        tmp_path / "docs" / "products" / "_candidates" / "_brainstorm_dev_tools.md"
-    )
+    written = tmp_path / "docs" / "products" / "_candidates" / "_brainstorm_dev_tools.md"
     assert written.exists(), f"brainstorm file not written at {written}"
     text = written.read_text()
     assert "Brainstorm — dev_tools" in text

@@ -206,6 +206,4 @@ async def test_single_scan_mode_still_works(
     outputs = await agent.handle(msg)
 
     assert outputs[0].payload.status == TaskStatus.DONE
-    assert (
-        tmp_path / "docs" / "sandbox" / "ideas" / "single-scan-probe.md"
-    ).exists()
+    assert (tmp_path / "docs" / "sandbox" / "ideas" / "single-scan-probe.md").exists()

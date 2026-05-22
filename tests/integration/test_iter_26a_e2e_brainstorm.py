@@ -242,9 +242,7 @@ class _BrainstormScriptedLLM:
                 return niche
         # Fallback: scan kwargs for json_schema 'niche' enum
         # (shouldn't be needed, but defensive).
-        raise RuntimeError(
-            f"could not detect niche from user_message: {user_message[:200]!r}"
-        )
+        raise RuntimeError(f"could not detect niche from user_message: {user_message[:200]!r}")
 
     async def reset_session(self, session_id: str) -> None:
         return None
@@ -412,8 +410,7 @@ async def test_brainstorm_products_full_chain(
             f"senders={senders}"
         )
         assert len(qa_done_rows) >= 1, (
-            f"expected ≥1 qa_engineer TASK_REPORT row, got {len(qa_done_rows)}; "
-            f"senders={senders}"
+            f"expected ≥1 qa_engineer TASK_REPORT row, got {len(qa_done_rows)}; senders={senders}"
         )
 
         # Each MR report must be DONE.
@@ -448,8 +445,7 @@ async def test_brainstorm_products_full_chain(
         assert "team_lead" in llm.calls, f"TL was never called; llm.calls={llm.calls}"
         mr_calls = [c for c in llm.calls if c.startswith("market_researcher:")]
         assert len(mr_calls) == 3, (
-            f"expected 3 MR LLM calls (one per niche), got {len(mr_calls)}; "
-            f"llm.calls={llm.calls}"
+            f"expected 3 MR LLM calls (one per niche), got {len(mr_calls)}; llm.calls={llm.calls}"
         )
         mr_niches_called = {c.split(":")[1] for c in mr_calls}
         assert mr_niches_called == {"dev_tools", "b2b_smb", "creator_tools"}, (

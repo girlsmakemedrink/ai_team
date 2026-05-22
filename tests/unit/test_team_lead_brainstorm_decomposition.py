@@ -38,9 +38,7 @@ class _StubLLM:
             text="",
             structured=self._structured,
             session_id="stub-session",
-            tokens=TokensUsage(
-                input=10, output=20, cached_input=0, model="claude-opus-4-7"
-            ),
+            tokens=TokensUsage(input=10, output=20, cached_input=0, model="claude-opus-4-7"),
             cost_estimate_cents=5,
             duration_ms=123,
             validated_against_schema=True,
@@ -258,14 +256,11 @@ def test_tl_qa_subtask_gated_on_all_3_mr_task_ids() -> None:
     mr_task_ids = {
         str(o.payload.task_id)
         for o in assignments
-        if o.recipient == AgentId.MARKET_RESEARCHER
-        and isinstance(o.payload, TaskAssignmentPayload)
+        if o.recipient == AgentId.MARKET_RESEARCHER and isinstance(o.payload, TaskAssignmentPayload)
     }
     assert len(mr_task_ids) == 3
 
-    qa_assignment = next(
-        o for o in assignments if o.recipient == AgentId.QA_ENGINEER
-    )
+    qa_assignment = next(o for o in assignments if o.recipient == AgentId.QA_ENGINEER)
     qa_depends_on = set(qa_assignment.metadata.get("depends_on", []))
 
     assert qa_depends_on == mr_task_ids, (
@@ -328,8 +323,7 @@ def test_tl_qa_subtask_slug_is_rank_candidates() -> None:
     qa_assignments = [
         o
         for o in outputs
-        if o.message_type == MessageType.TASK_ASSIGNMENT
-        and o.recipient == AgentId.QA_ENGINEER
+        if o.message_type == MessageType.TASK_ASSIGNMENT and o.recipient == AgentId.QA_ENGINEER
     ]
     assert len(qa_assignments) == 1
     assert qa_assignments[0].metadata.get("subtask_id") == "rank_candidates"

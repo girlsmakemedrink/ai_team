@@ -59,7 +59,8 @@ def _brainstorm_md(niche: str, slugs: list[str]) -> str:
 
 @pytest.mark.asyncio
 async def test_qa_rank_brainstorm_writes_combined_ranking_with_explicit_artifacts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When inputs.brainstorm_artifacts is explicitly provided, QA reads from those paths."""
     monkeypatch.setattr("agents.qa_engineer.agent._REPO_ROOT", tmp_path)
@@ -112,7 +113,8 @@ async def test_qa_rank_brainstorm_writes_combined_ranking_with_explicit_artifact
 
 @pytest.mark.asyncio
 async def test_qa_rank_brainstorm_fallback_glob_when_artifacts_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When inputs.brainstorm_artifacts is absent, QA globs _brainstorm_*.md from _RANKING_DIR."""
     monkeypatch.setattr("agents.qa_engineer.agent._REPO_ROOT", tmp_path)

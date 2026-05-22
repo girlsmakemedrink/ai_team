@@ -100,16 +100,22 @@ BRAINSTORM_NICHE_SCHEMA: dict[str, object] = {
             "items": {
                 "type": "object",
                 "required": [
-                    "title", "slug", "one_paragraph", "target_buyer",
-                    "monetization", "known_competitors", "scores",
-                    "composite_score", "rationale",
+                    "title",
+                    "slug",
+                    "one_paragraph",
+                    "target_buyer",
+                    "monetization",
+                    "known_competitors",
+                    "scores",
+                    "composite_score",
+                    "rationale",
                 ],
                 "additionalProperties": False,
                 "properties": {
-                    "title":         {"type": "string", "minLength": 1, "maxLength": 120},
-                    "slug":          {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+                    "title": {"type": "string", "minLength": 1, "maxLength": 120},
+                    "slug": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
                     "one_paragraph": {"type": "string", "minLength": 1, "maxLength": 1500},
-                    "target_buyer":  {"type": "string", "minLength": 1, "maxLength": 300},
+                    "target_buyer": {"type": "string", "minLength": 1, "maxLength": 300},
                     "monetization": {
                         "type": "string",
                         "enum": ["subscription", "per-seat", "usage", "one-time", "freemium"],
@@ -121,8 +127,8 @@ BRAINSTORM_NICHE_SCHEMA: dict[str, object] = {
                             "required": ["name", "positioning"],
                             "additionalProperties": False,
                             "properties": {
-                                "name":        {"type": "string"},
-                                "url":         {"type": "string"},
+                                "name": {"type": "string"},
+                                "url": {"type": "string"},
                                 "positioning": {"type": "string"},
                             },
                         },
@@ -130,30 +136,27 @@ BRAINSTORM_NICHE_SCHEMA: dict[str, object] = {
                     "scores": {
                         "type": "object",
                         "required": [
-                            "tam_signal", "solo_fit", "llm_opex_fit",
-                            "defensibility", "time_to_first_revenue",
+                            "tam_signal",
+                            "solo_fit",
+                            "llm_opex_fit",
+                            "defensibility",
+                            "time_to_first_revenue",
                         ],
                         "additionalProperties": False,
                         "properties": {
-                            "tam_signal": {
-                                "type": "integer", "minimum": 1, "maximum": 5
-                            },
-                            "solo_fit": {
-                                "type": "integer", "minimum": 1, "maximum": 5
-                            },
-                            "llm_opex_fit": {
-                                "type": "integer", "minimum": 1, "maximum": 5
-                            },
-                            "defensibility": {
-                                "type": "integer", "minimum": 1, "maximum": 5
-                            },
+                            "tam_signal": {"type": "integer", "minimum": 1, "maximum": 5},
+                            "solo_fit": {"type": "integer", "minimum": 1, "maximum": 5},
+                            "llm_opex_fit": {"type": "integer", "minimum": 1, "maximum": 5},
+                            "defensibility": {"type": "integer", "minimum": 1, "maximum": 5},
                             "time_to_first_revenue": {
-                                "type": "integer", "minimum": 1, "maximum": 5
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5,
                             },
                         },
                     },
                     "composite_score": {"type": "integer", "minimum": 5, "maximum": 25},
-                    "rationale":       {"type": "string", "minLength": 1, "maxLength": 1500},
+                    "rationale": {"type": "string", "minLength": 1, "maxLength": 1500},
                 },
             },
         },
@@ -350,24 +353,34 @@ class MarketResearcherAgent(BaseAgent):
         top_3 = scan.get("researcher_top_3_slugs") or []
         if not set(top_3).issubset(candidate_slugs):
             missing = set(top_3) - candidate_slugs
-            return [self._fail(
-                incoming,
-                f"researcher_top_3 references unknown slugs: {sorted(missing)}",
-            )]
+            return [
+                self._fail(
+                    incoming,
+                    f"researcher_top_3 references unknown slugs: {sorted(missing)}",
+                )
+            ]
 
         # composite_score must equal sum of axes
         for cand in candidates:
             scores = cand.get("scores") or {}
-            expected = sum(scores.get(k, 0) for k in (
-                "tam_signal", "solo_fit", "llm_opex_fit",
-                "defensibility", "time_to_first_revenue",
-            ))
+            expected = sum(
+                scores.get(k, 0)
+                for k in (
+                    "tam_signal",
+                    "solo_fit",
+                    "llm_opex_fit",
+                    "defensibility",
+                    "time_to_first_revenue",
+                )
+            )
             if cand.get("composite_score") != expected:
-                return [self._fail(
-                    incoming,
-                    f"composite_score mismatch for {cand.get('slug')!r}: "
-                    f"got {cand.get('composite_score')}, expected sum {expected}",
-                )]
+                return [
+                    self._fail(
+                        incoming,
+                        f"composite_score mismatch for {cand.get('slug')!r}: "
+                        f"got {cand.get('composite_score')}, expected sum {expected}",
+                    )
+                ]
 
         filename = f"_brainstorm_{niche}.md"
         try:
@@ -403,15 +416,12 @@ class MarketResearcherAgent(BaseAgent):
             return []
         assert isinstance(msg.payload, TaskAssignmentPayload)
         mode = (msg.payload.inputs or {}).get("mode")
-        schema = (
-            BRAINSTORM_NICHE_SCHEMA if mode == "brainstorm_niche" else MARKET_SCAN_SCHEMA
-        )
+        schema = BRAINSTORM_NICHE_SCHEMA if mode == "brainstorm_niche" else MARKET_SCAN_SCHEMA
         # session_id: per-task for brainstorm (so 3 parallel niche runs do NOT
         # collide on _claimed_sessions under one root correlation_id); per-
         # correlation for the single-scan path (existing semantics preserved).
         session_id = (
-            str(msg.payload.task_id) if mode == "brainstorm_niche"
-            else str(msg.correlation_id)
+            str(msg.payload.task_id) if mode == "brainstorm_niche" else str(msg.correlation_id)
         )
         response = await self._llm.invoke(
             system_prompt=self.system_prompt(),
