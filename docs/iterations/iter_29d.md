@@ -201,7 +201,20 @@ iter-29d adds:
 
 ## Addendum A: gate-wiring audit findings
 
-Empty at spec time. Populated during Item 2 with grep/read evidence and the design-vs-hole verdict.
+**Verdict: design rule, not a wiring hole.**
+
+`pending_reviews` rows are written exclusively by the QA Engineer agent's safety-net path at `agents/qa_engineer/agent.py:523`. Confirmed via:
+
+- `grep -rn "PendingReview(" agents/ core/` → two hits: `agents/qa_engineer/agent.py:523` (producer) and `core/persistence/models.py:111` (class definition). Single producer site.
+- `core/dispatcher/dispatcher.py::_handle_one` (lines 117–206) — no `PendingReview` construction. The dispatcher exclusively handles HMAC-verify → agent dispatch → audit/feed-publish → task-state bookkeeping → bus-publish. No review rows written.
+- `core/persistence/task_state.py:182` (`task_state.parent_rolled_up_on_drop`) and `task_state.py:254` (`task_state.parent_rolled_up`) — both are log-emit-only sites on parent Task row status updates. No `PendingReview` construction in the reducer.
+- `agents/team_lead/agent.py` → no `PendingReview` import or review-creation call anywhere in the decomposition path. Only two `review`-adjacent occurrences are comment text at lines 225 and 239 (DAG-preview broadcast).
+
+**Implication for iter-29b's "no pending_review fired" surprise.** The TL → DevOps single-agent chain skipped QA, so no producer ran. The missing review is a chain-shape consequence, not a wiring bug.
+
+**Design rule** (added to `CLAUDE.md` in Item 8): `pending_reviews` are produced by QA Engineer only; chains that skip QA legitimately skip the review record.
+
+**No code change in this iter.**
 
 ---
 
