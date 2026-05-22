@@ -208,12 +208,27 @@ async def _run_watch(
 @click.option("--title", required=True)
 @click.option("--description", required=True)
 @click.option("--target-repo", default=None, help="Override TARGET_REPO (default: ai_team itself).")
+@click.option(
+    "--inputs-json",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, readable=True),
+    help="Path to a JSON file passed as TaskAssignmentPayload.inputs.",
+)
 @click.pass_context
-def submit(ctx: click.Context, title: str, description: str, target_repo: str | None) -> None:
+def submit(
+    ctx: click.Context,
+    title: str,
+    description: str,
+    target_repo: str | None,
+    inputs_json: str | None,
+) -> None:
     """Submit a new task to the Team Lead."""
     body: dict[str, Any] = {"title": title, "description": description}
     if target_repo:
         body["target_repo"] = target_repo
+    if inputs_json:
+        with open(inputs_json) as f:
+            body["inputs"] = json.load(f)
 
     resp = httpx.post(
         f"{_api_base(ctx)}/api/tasks",

@@ -201,6 +201,7 @@ class SubmitTaskRequest(BaseModel):
     description: str = Field(min_length=1, max_length=10_000)
     target_repo: str | None = None
     priority: Priority = Priority.P2
+    inputs: dict[str, Any] | None = None
 
 
 class SubmitTaskResponse(BaseModel):
@@ -246,6 +247,7 @@ async def submit_task(req: SubmitTaskRequest, request: Request) -> SubmitTaskRes
             title=req.title,
             description=req.description,
             target_repo=req.target_repo,
+            inputs=req.inputs or {},
         ),
     )
     signer: HMACSigner = request.app.state.signer
