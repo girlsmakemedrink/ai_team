@@ -66,7 +66,7 @@ class _DummyAgent(BaseAgent):
     system_prompt_path = Path("/dev/null")
     allowed_tools = ()
 
-    def build_outputs(self, response, incoming):  # type: ignore[no-untyped-def]
+    def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         return []
 
     def system_prompt(self) -> str:
@@ -121,6 +121,7 @@ async def test_cross_repo_dispatch_threads_workspace_to_llm(tmp_path: Path) -> N
         return_value=repo,
     ):
         await dispatcher._maybe_resolve_target_repo_workspace(msg)
+        assert msg.metadata.get("target_repo_workspace") == str(workspace)
         await agent._invoke_with_retries(
             msg=msg, system_prompt="sp", user_message="um"
         )
