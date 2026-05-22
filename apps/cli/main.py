@@ -342,6 +342,26 @@ def _resolve_review(ctx: click.Context, review_id: UUID, verb: str, comment: str
     console.print(f"[green]Review {review_id} {status_str}.[/]")
 
 
+def _extract_candidate_section(file_text: str, slug: str) -> str:
+    """Return the H2 section from a brainstorm markdown whose body contains
+    `**Slug:** <slug>`. Stops at the next H2 or end of file. Raises
+    ValueError if no matching section exists.
+    """
+    if not file_text:
+        raise ValueError("brainstorm file is empty")
+    lines = file_text.splitlines(keepends=True)
+    h2_indices: list[int] = [i for i, line in enumerate(lines) if line.startswith("## ")]
+    if not h2_indices:
+        raise ValueError("no H2 sections found in brainstorm file")
+    slug_marker = f"**Slug:** {slug}"
+    for idx, start in enumerate(h2_indices):
+        end = h2_indices[idx + 1] if idx + 1 < len(h2_indices) else len(lines)
+        section_text = "".join(lines[start:end])
+        if slug_marker in section_text:
+            return section_text.rstrip() + "\n"
+    raise ValueError(f"slug {slug!r} not found in brainstorm file")
+
+
 @cli.command(name="brainstorm-products")
 @click.option(
     "--niches",
@@ -408,6 +428,95 @@ def brainstorm_products(
             f"  niches:         {', '.join(niche_list)}\n"
             f"  watch:          ai-team watch --correlation {data['correlation_id']}",
             title="brainstorm-products submitted",
+            style="green",
+        )
+    )
+
+
+@cli.command(name="validate-product")
+@click.option(
+    "--slug",
+    required=True,
+    help="Candidate slug to validate (matches **Slug:** in --candidate-file).",
+)
+@click.option(
+    "--candidate-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Brainstorm markdown containing the slug's section.",
+)
+@click.option(
+    "--depth",
+    type=click.Choice(["quick", "standard", "deep"]),
+    default="standard",
+    help="Competitor-scan breadth (quick=5, standard=15, deep=30).",
+)
+@click.option(
+    "--constraints-json",
+    type=click.Path(exists=True, dir_okay=False),
+    default="scripts/iter_26b_constraints.json",
+    show_default=True,
+    help="Owner-profile + budget envelope JSON.",
+)
+@click.pass_context
+def validate_product(
+    ctx: click.Context,
+    slug: str,
+    candidate_file: str,
+    depth: str,
+    constraints_json: str,
+) -> None:
+    """Submit a single-candidate validation task.
+
+    Reads the slug's H2 section from --candidate-file, parses
+    --constraints-json, and POSTs /api/tasks with
+    inputs.intent='validate_product'.
+    """
+    try:
+        brainstorm_text = Path(candidate_file).read_text()
+        candidate_brief = _extract_candidate_section(brainstorm_text, slug)
+    except (OSError, ValueError) as exc:
+        console.print(f"[red]Candidate brief: {exc}[/]")
+        sys.exit(1)
+
+    try:
+        constraints = json.loads(Path(constraints_json).read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Constraints JSON: {exc}[/]")
+        sys.exit(1)
+
+    payload = {
+        "title": f"Validate product: {slug}",
+        "description": candidate_brief,
+        "priority": "p2",
+        "inputs": {
+            "intent": "validate_product",
+            "slug": slug,
+            "depth": depth,
+            "candidate_brief": candidate_brief,
+            "constraints": constraints,
+        },
+    }
+    resp = httpx.post(
+        f"{_api_base(ctx)}/api/tasks",
+        json=payload,
+        headers=_token_header(ctx),
+        timeout=15.0,
+    )
+    if resp.status_code != 200:
+        console.print(f"[red]Failed: {resp.status_code} {resp.text}[/]")
+        sys.exit(1)
+    data = resp.json()
+    correlation_short = str(data["correlation_id"])[:8]
+    console.print(
+        Panel(
+            f"[bold]Validation submitted.[/]\n"
+            f"  task_id:        {data['task_id']}\n"
+            f"  correlation_id: {data['correlation_id']}\n"
+            f"  slug:           {slug}\n"
+            f"  depth:          {depth}\n\n"
+            f"[dim]Tail with:[/] ai-team watch --correlation {correlation_short}",
+            title="validate-product",
             style="green",
         )
     )
