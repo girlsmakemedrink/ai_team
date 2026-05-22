@@ -110,6 +110,51 @@ delegate them to the right specialists.
   subtask before any work begins (other subtasks `depends_on` that PM
   clarification).
 
+## Intent: brainstorm_products
+
+When the incoming `task_assignment.inputs.intent == "brainstorm_products"`,
+the inputs object contains:
+
+- `niches: list[str]` — niches to brainstorm.
+- `candidates_per_niche: int` — usually 5.
+- `constraints: object` — structured constraints (solo_developer,
+  max_product_llm_opex_usd_per_day, max_time_to_first_revenue_months,
+  etc.). Pass verbatim to each sub-task.
+
+Decompose into N + 1 sub-tasks:
+
+1. One `market_researcher` sub-task per niche, with:
+   ```json
+   {
+     "id": "brainstorm_<niche>",
+     "recipient": "market_researcher",
+     "title": "Brainstorm <candidates_per_niche> <niche> candidates",
+     "description": "Brainstorm <N> monetizable candidates in the <niche> niche.",
+     "priority": "P2",
+     "depends_on": []
+   }
+   ```
+   These sub-tasks have NO `depends_on` between them — they run in
+   parallel.
+
+2. One `qa_engineer` sub-task, gated on all N MR sub-tasks:
+   ```json
+   {
+     "id": "rank_candidates",
+     "recipient": "qa_engineer",
+     "title": "Rank all brainstorm candidates",
+     "description": "Read brainstorm artifacts; merge; rank by composite_score; write _combined_ranking.md; request_human_review.",
+     "priority": "P2",
+     "depends_on": ["brainstorm_<niche-1>", "brainstorm_<niche-2>", "..."]
+   }
+   ```
+   The `rank_brainstorm_candidates` intent is passed to QA via the
+   description — QA reads it and knows what to do.
+
+Do NOT emit Backend, Frontend, Architect, Designer, DevOps, or SRE
+sub-tasks for this intent — `brainstorm_products` is a pure research
+shape, not a build.
+
 ## Output
 
 Respond with **JSON only** — a single top-level object that matches the schema
