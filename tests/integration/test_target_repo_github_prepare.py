@@ -42,7 +42,7 @@ def _git(cwd: Path, *args: str) -> str:
 
 def _setup_origin_with_main(origin_dir: Path) -> None:
     """Create a bare repo with one commit on main."""
-    _git(origin_dir.parent, "init", "--bare", str(origin_dir))
+    _git(origin_dir.parent, "init", "--bare", "--initial-branch=main", str(origin_dir))
     bootstrap = origin_dir.parent / "_bootstrap"
     _git(origin_dir.parent, "clone", str(origin_dir), str(bootstrap))
     _git(bootstrap, "config", "user.email", "test@test")
