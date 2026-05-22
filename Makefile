@@ -100,7 +100,7 @@ smoke-github-target-repo: ## iter-28 smoke — clone product repo via GitHubTarg
 	bash scripts/smoke_github_target_repo.sh
 
 smoke-cross-repo-dispatch: ## iter-29c smoke — dispatcher → BaseAgent threads cwd + AI_TEAM_REPO_ROOT (mocked LLM, real clone)
-	@bash scripts/smoke_cross_repo_dispatch.sh
+	bash scripts/smoke_cross_repo_dispatch.sh
 
 demo: demo-iter-25 ## Alias for the current iteration's demo
 
