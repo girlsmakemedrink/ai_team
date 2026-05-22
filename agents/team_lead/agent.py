@@ -28,7 +28,7 @@ from core.messaging.schemas import (
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from core.llm.base import LLMResponse
+    from core.llm.base import LLMClient, LLMResponse
 
 _log = structlog.get_logger(__name__)
 
@@ -53,6 +53,10 @@ _ALREADY_ROUTED_MARKER = "auto-routed already"
 # blocked_on instead of the canonical token; this signal sidesteps
 # that fragility entirely.
 _SCOPE_PREFLIGHT_SUMMARY_PREFIX = "Scope pre-flight"
+# iter-29c: cap TL self-targeted re-decompose chains so Backend's
+# 1500-char tripwire can't drive a runaway. Counted per correlation_id
+# on the TeamLeadAgent instance — see iter_29c.md Phase B.
+MAX_REDECOMPOSE_DEPTH = 2
 
 
 # Per-subtask slug pattern, also reused for depends_on references.
@@ -130,6 +134,17 @@ class TeamLeadAgent(BaseAgent):
     # demos). Stays at 300 after iter-11 flipped BaseAgent's default
     # to 600.
     llm_timeout_s: ClassVar[int] = 300
+
+    def __init__(self, *, llm: LLMClient) -> None:
+        super().__init__(llm=llm)
+        # iter-29c: per-correlation re-decompose counter. Bumped each
+        # time `_re_decompose_on_too_large` emits a TL→TL self-assignment;
+        # cleared on cap-exceeded FAILED emit. Successful chains
+        # (Backend → DONE) leave their entry in the dict until process
+        # restart — bounded by lifetime correlation count, not live
+        # cardinality. Acceptable today (one entry per chain that ever
+        # tripped the wire); revisit if memory profile shows growth.
+        self._redecompose_depth: dict[UUID, int] = {}
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if incoming.message_type != MessageType.TASK_ASSIGNMENT:
@@ -350,9 +365,12 @@ class TeamLeadAgent(BaseAgent):
         new task_assignment. TL's standard handle() runs the
         decomposition LLM and emits smaller Backend subtasks.
 
-        Anti-loop: refuse if the BLOCKED summary already carries the
-        'auto-routed already' marker (Backend's tripwire propagates it
-        when the incoming task description was itself an auto-route).
+        Anti-loop:
+        - Existing: refuse if the BLOCKED summary already carries the
+          'auto-routed already' marker.
+        - iter-29c: cap re-decompose chain at MAX_REDECOMPOSE_DEPTH per
+          correlation_id. On overflow, emit TASK_REPORT(FAILED) so the
+          cascade-drops substrate fans out dependents.
         """
         assert isinstance(msg.payload, TaskReportPayload)
         summary = msg.payload.summary
@@ -363,11 +381,52 @@ class TeamLeadAgent(BaseAgent):
                 correlation_id=str(msg.correlation_id),
             )
             return []
+
+        # iter-29c: depth-cap check. depth = number of re-decompose
+        # self-assignments already emitted for this correlation.
+        depth = self._redecompose_depth.get(msg.correlation_id, 0)
+        if depth >= MAX_REDECOMPOSE_DEPTH:
+            self._log.warning(
+                "tl.task_too_large_cap_exceeded",
+                sender=msg.sender.value,
+                correlation_id=str(msg.correlation_id),
+                depth=depth,
+                cap=MAX_REDECOMPOSE_DEPTH,
+            )
+            # Intentional reset: a future BLOCKED on this same
+            # correlation (e.g., owner-initiated retry after the FAILED
+            # report) starts a fresh depth=0 chain. The FAILED report
+            # is the user-visible signal; counter persistence is not.
+            self._redecompose_depth.pop(msg.correlation_id, None)
+            cap_summary = (
+                f"re-decompose depth cap ({MAX_REDECOMPOSE_DEPTH}) exceeded. "
+                f"Backend's tripwire fired {depth + 1}x within this "
+                f"correlation. Last BLOCKED summary: {summary[:300]}"
+            )[:2_000]
+            return [
+                AgentMessage(
+                    correlation_id=msg.correlation_id,
+                    sender=AgentId.TEAM_LEAD,
+                    recipient=AgentId.USER,
+                    message_type=MessageType.TASK_REPORT,
+                    priority=Priority.P1,
+                    payload=TaskReportPayload(
+                        task_id=msg.payload.task_id,
+                        status=TaskStatus.FAILED,
+                        progress_pct=0,
+                        summary=cap_summary,
+                    ),
+                )
+            ]
+
         self._log.info(
             "tl.task_too_large_re_decompose",
             sender=msg.sender.value,
             correlation_id=str(msg.correlation_id),
+            depth=depth,
         )
+        self._redecompose_depth[msg.correlation_id] = depth + 1
+
         description = (
             f"[{_AUTO_ROUTED_MARKER} from {msg.sender.value}] "
             f"{msg.sender.value} reported BLOCKED(task_too_large). "
@@ -381,9 +440,7 @@ class TeamLeadAgent(BaseAgent):
         # re-decompose anchor. The downstream children TL emits will
         # carry this as their parent_task_id; that row is already in
         # the `tasks` table (Backend was running it), so the FK
-        # constraint on inserts holds. Using `uuid4()` here created an
-        # orphan parent → ForeignKeyViolationError that crashed the
-        # dispatcher worker on every Backend tripwire.
+        # constraint on inserts holds.
         return [
             AgentMessage(
                 correlation_id=msg.correlation_id,
@@ -396,6 +453,7 @@ class TeamLeadAgent(BaseAgent):
                     title=f"Re-decompose: {summary[:80]}",
                     description=description,
                 ),
+                metadata={"redecompose_depth": depth + 1},
             )
         ]
 
