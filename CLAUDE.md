@@ -24,6 +24,15 @@ iter-28). iter-27 deliverables: PRD + 6 ADRs + crisis playbook + smoke
 pipelines (GitHub poll + Telegram publish). See
 `docs/iterations/iter_27_retro.md` + `iter_27_handoff.md`.
 
+**iter-28 (2026-05-22, GitHubTargetRepo shipped):** `core/target_repo/github.py`
+closes the ADR-009 carry-over. `make smoke-github-target-repo` clones and
+probes `girlsmakemedrink/telegram-tech-publisher` end-to-end (status + lint
++ tests). ai_team can now be pointed at any external GitHub repo via
+`target_repo: "<owner>/<repo>"` on a task assignment; clone reuses the
+existing `gh` auth substrate (no separate SSH key required). Agent
+invocations against the new repo queue for iter-29. See
+`docs/iterations/iter_28_retro.md` + `iter_28_handoff.md`.
+
 Owner: solo dev (@girlsmakemedrink). No other humans in the loop.
 
 ## Hard constraint — LLM access
@@ -301,5 +310,10 @@ the product repo holds PRD + ADRs + code.
   estimates drift from reality > 20 %, recalibrate the price table in
   `core/llm/base.py:PRICE_TABLE_CENTS_PER_MTOK`, then move on.
 - **Use TaskCreate** to track work in iterations of ≥3 steps.
+- **Branch BEFORE the first commit on a fresh-cloned repo.** Default to
+  a feature branch even when "I'll branch after this commit" feels
+  obvious — local-`main` divergence is harder to undo than to prevent,
+  and the auto-classifier (correctly) blocks `git reset --hard` as a
+  recovery shortcut. Lesson from iter-27 Phase A.
 - **Commit small, conventional, push frequently.** Squash-merge collapses
   on merge.
