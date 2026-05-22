@@ -76,3 +76,14 @@ class TargetRepo(ABC):
 
     @abstractmethod
     async def status(self) -> RepoStatus: ...
+
+    async def prepare_for_task(self) -> None:
+        """Pre-task workspace cleanup hook.
+
+        Called by the dispatcher after `ensure_local_clone()` and before
+        the task is dispatched. Default: no-op. Concrete implementations
+        override to reset workspace state (e.g. checkout main, ff-only
+        merge). Failure should raise; the dispatcher's outer try/except
+        catches and routes via `_synthesise_failed_report`.
+        """
+        return None

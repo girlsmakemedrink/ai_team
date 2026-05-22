@@ -213,10 +213,10 @@ class AgentDispatcher:
         - msg is not a TaskAssignment;
         - payload.target_repo is None (self-hosting path).
 
-        Raises whatever `resolve_target_repo` or `ensure_local_clone`
-        raises (ValueError, GitCommandError, etc.). `_handle_one`'s
-        outer try/except catches and synthesises a FAILED report via
-        the existing iter-5 substrate.
+        Raises whatever `resolve_target_repo`, `ensure_local_clone`, or
+        `prepare_for_task` raises (ValueError, GitCommandError, etc.).
+        `_handle_one`'s outer try/except catches and synthesises a FAILED
+        report via the existing iter-5 substrate.
         """
         if not isinstance(msg.payload, TaskAssignmentPayload):
             return
@@ -225,6 +225,7 @@ class AgentDispatcher:
             return
         repo = resolve_target_repo(identifier, ai_team_root=self._ai_team_root)
         workspace = await repo.ensure_local_clone()
+        await repo.prepare_for_task()
         msg.metadata["target_repo_workspace"] = str(workspace)
 
     async def _maybe_record_task_state(self, msg: AgentMessage) -> None:

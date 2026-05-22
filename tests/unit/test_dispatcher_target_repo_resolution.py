@@ -76,6 +76,7 @@ async def test_resolves_and_stashes_workspace_for_assignment_with_target_repo(
 
     fake_repo = AsyncMock()
     fake_repo.ensure_local_clone = AsyncMock(return_value=workspace)
+    fake_repo.prepare_for_task = AsyncMock(return_value=None)
 
     dispatcher = _make_dispatcher(tmp_path)
     msg = _assignment(target_repo="owner/repo")
@@ -87,6 +88,8 @@ async def test_resolves_and_stashes_workspace_for_assignment_with_target_repo(
         await dispatcher._maybe_resolve_target_repo_workspace(msg)
 
     mock_resolve.assert_called_once_with("owner/repo", ai_team_root=tmp_path)
+    fake_repo.ensure_local_clone.assert_awaited_once()
+    fake_repo.prepare_for_task.assert_awaited_once()
     assert msg.metadata.get("target_repo_workspace") == str(workspace)
 
 
@@ -146,5 +149,29 @@ async def test_clone_failure_propagates_for_synthesise_catch(tmp_path: Path) -> 
             return_value=fake_repo,
         ),
         pytest.raises(RuntimeError, match="git clone failed"),
+    ):
+        await dispatcher._maybe_resolve_target_repo_workspace(msg)
+
+
+async def test_prepare_for_task_failure_propagates_for_synthesise_catch(
+    tmp_path: Path,
+) -> None:
+    """If prepare_for_task raises, exception escapes so `_handle_one`'s
+    outer try/except can synthesise a FAILED report."""
+    fake_repo = AsyncMock()
+    fake_repo.ensure_local_clone = AsyncMock(return_value=tmp_path / "ws")
+    fake_repo.prepare_for_task = AsyncMock(
+        side_effect=RuntimeError("local main diverged from origin/main")
+    )
+
+    dispatcher = _make_dispatcher(tmp_path)
+    msg = _assignment(target_repo="owner/repo")
+
+    with (
+        patch(
+            "core.dispatcher.dispatcher.resolve_target_repo",
+            return_value=fake_repo,
+        ),
+        pytest.raises(RuntimeError, match="local main diverged"),
     ):
         await dispatcher._maybe_resolve_target_repo_workspace(msg)

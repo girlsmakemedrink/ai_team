@@ -92,3 +92,37 @@ class GitHubTargetRepo(SelfBootstrapTargetRepo):
         if rc != 0:
             raise GitCommandError(f"gh repo clone failed: {err.strip()[:500]}")
         return self.root
+
+    async def prepare_for_task(self) -> None:
+        """Reset workspace to a clean default branch before each task.
+
+        Steps: fetch origin/<default_branch> → dirty-check → checkout
+        <default_branch> → ff-only merge origin/<default_branch>.
+        Loud-fail on dirty workspace or diverged local branch; no
+        destructive reset. Owner intervenes.
+        """
+        rc, _out, err = await _run("git", "fetch", "origin", self.default_branch, cwd=self.root)
+        if rc != 0:
+            raise GitCommandError(
+                f"failed to fetch origin/{self.default_branch}: {err.strip()[:500]}"
+            )
+        rc, out, err = await _run("git", "status", "--porcelain", cwd=self.root)
+        if rc != 0:
+            raise GitCommandError(f"git status failed: {err.strip()[:500]}")
+        if out.strip():
+            raise GitCommandError(
+                f"workspace has uncommitted changes: {out.strip()[:500]}; "
+                f"refusing to checkout {self.default_branch}"
+            )
+        rc, _out, err = await _run("git", "checkout", self.default_branch, cwd=self.root)
+        if rc != 0:
+            raise GitCommandError(f"git checkout {self.default_branch} failed: {err.strip()[:500]}")
+        rc, _out, err = await _run(
+            "git", "merge", "--ff-only", f"origin/{self.default_branch}", cwd=self.root
+        )
+        if rc != 0:
+            raise GitCommandError(
+                f"local {self.default_branch} diverged from"
+                f" origin/{self.default_branch}: {err.strip()[:500]};"
+                f" manual intervention required"
+            )

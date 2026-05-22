@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -41,3 +42,57 @@ def test_subclass_must_implement_abstract_methods() -> None:
 
     with pytest.raises(TypeError):
         Incomplete()  # type: ignore[abstract]
+
+
+class _MinimalRepo(TargetRepo):
+    """Implements the abstract surface with placeholders; only here to
+    instantiate TargetRepo for testing the concrete no-op method."""
+
+    async def ensure_local_clone(self) -> Path:
+        return self.root
+
+    async def checkout(self, branch: str, *, base: str | None = None) -> None:
+        return None
+
+    async def stage_and_commit(self, paths: Sequence[str], message: str, author: str) -> str:
+        return "sha"
+
+    async def push(self, branch: str) -> None:
+        return None
+
+    async def open_pr(self, *, head: str, base: str, title: str, body: str) -> PullRequest:
+        raise NotImplementedError
+
+    async def run_tests(self, command: str | None = None) -> _TestRunResult:
+        raise NotImplementedError
+
+    async def run_linter(self) -> LintRunResult:
+        raise NotImplementedError
+
+    async def status(self) -> RepoStatus:
+        raise NotImplementedError
+
+
+@pytest.mark.asyncio
+async def test_prepare_for_task_default_is_noop(tmp_path: Path) -> None:
+    repo = _MinimalRepo()
+    repo.root = tmp_path
+    # Should not raise.
+    await repo.prepare_for_task()
+
+
+@pytest.mark.asyncio
+async def test_self_bootstrap_inherits_default_prepare_for_task(tmp_path: Path) -> None:
+    from core.target_repo.self_bootstrap import SelfBootstrapTargetRepo
+
+    repo = SelfBootstrapTargetRepo(root=tmp_path)
+    await repo.prepare_for_task()
+
+
+@pytest.mark.asyncio
+async def test_in_repo_example_inherits_default_prepare_for_task(tmp_path: Path) -> None:
+    from core.target_repo.in_repo_example import InRepoExampleTargetRepo
+
+    # Use the same constructor shape as existing InRepoExample tests.
+    repo = InRepoExampleTargetRepo(root=tmp_path, name="idea_validator")
+    await repo.prepare_for_task()
