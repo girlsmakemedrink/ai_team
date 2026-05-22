@@ -109,3 +109,52 @@ Selected when `inputs.intent == "rank_brainstorm_candidates"`.
 - Top-3 slugs MUST appear in at least one of the brainstorm
   artifacts. If you can't find them, the test suite will fail the
   cross-check.
+
+## Intent: synthesize_validation
+
+When `inputs.intent == "synthesize_validation"`, you are synthesizing a build-or-pivot recommendation for one product candidate (`inputs.slug`) from three upstream agent reports already on disk:
+
+- `docs/products/<slug>/competitors.md` (MR)
+- `docs/products/<slug>/tech_risk.md` (Architect)
+- `docs/products/<slug>/revenue.md` (PM)
+
+Read all three before responding.
+
+### Output structure (matches SYNTHESIZE_VALIDATION_SCHEMA)
+
+- `intent_completed`: literal `"synthesize_validation"`.
+- `recommendation`: one of `"go" | "go_with_caveats" | "pivot" | "kill"`.
+- `confidence`: 0-5 integer.
+- `top_risks`: 0-5 items `{name, severity (1-5), mitigation}`.
+- `fatal_flaws`: array of strings. **If non-empty, recommendation MUST be `kill` or `pivot`.** Python will coerce to `kill` if you violate this.
+- `build_window`: one of `"4-6 weeks" | "6-8 weeks" | "8-12 weeks" | "12+ weeks" | "unknown"`.
+- `next_steps`: 1-7 strings.
+- `summary`: ≤ 2000 chars, one-paragraph defense of the recommendation.
+- `artifacts`: paths you wrote.
+
+### Process
+
+1. Read the three upstream artifacts. Note each agent's verdict.
+2. Side-by-side cross-cuts:
+   - MR's `verdict` (`underserved` / `saturated` / `marginal`)
+   - Architect's `verdict` (`feasible` / `feasible_with_caveats` / `blocked`)
+   - PM's `verdict` (`viable` / `viable_with_caveats` / `not_viable`)
+3. Look for emergent cross-agent risks — risks that appear when combining two reports but not in either alone (e.g., MR finds competitor X with same moat AND PM confirms competitor X has same pricing → moat doesn't hold).
+4. Risk register — top 5 deduped risks across the three reports + cross-cuts. Each `{name, severity (1-5), mitigation}`. Severity 5 is "could end the product"; severity 1 is "annoying but routine."
+5. Fatal flaws — list specific show-stoppers (ToS violation, already-saturated niche, sub-$0 unit economics, blocked component). Each in one sentence. Empty array if none.
+6. Recommendation:
+   - `go` — no fatal flaws, all top risks have mitigations.
+   - `go_with_caveats` — no fatal flaws, 1-2 risks lack mitigation.
+   - `pivot` — at least one high-severity risk dominates the pick; a backup candidate would be better.
+   - `kill` — at least one fatal flaw.
+7. Confidence — 0 (coin flip) to 5 (highly confident).
+8. Next steps:
+   - If `go` / `go_with_caveats`: top-3 open questions for iter-27 + suggested first-iteration scope.
+   - If `pivot`: top-2 backup slugs from `docs/products/_candidates/_combined_ranking.md` to validate next.
+   - If `kill`: what changed in our understanding (1-3 bullets).
+9. Build window from Architect's report (do not invent a new one).
+10. Summary — one paragraph defending the recommendation, citing specific evidence from the three reports.
+
+### Hard rule
+
+If `fatal_flaws` is non-empty and `recommendation` is `go` or `go_with_caveats`, Python overrides your recommendation to `kill` and records your original in `_coerced_from`. This is the only place the framework second-guesses you; behave accordingly.
