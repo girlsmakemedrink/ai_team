@@ -20,8 +20,9 @@ tools/) to keep agents/ → tools/ layer separation clean.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import structlog
 
@@ -45,6 +46,9 @@ _log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RANKING_DIR: Path = _REPO_ROOT / "docs" / "products" / "_candidates"
+_VALIDATE_DIR: Path = _REPO_ROOT / "docs" / "products"
+
+_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 QA_REPORT_SCHEMA: dict[str, object] = {
@@ -77,6 +81,132 @@ RANK_BRAINSTORM_SCHEMA: dict[str, object] = {
         },
     },
 }
+
+
+SYNTHESIZE_VALIDATION_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "intent_completed",
+        "recommendation",
+        "confidence",
+        "top_risks",
+        "fatal_flaws",
+        "build_window",
+        "next_steps",
+        "summary",
+        "artifacts",
+    ],
+    "properties": {
+        "intent_completed": {"const": "synthesize_validation"},
+        "recommendation": {"enum": ["go", "go_with_caveats", "pivot", "kill"]},
+        "confidence": {"type": "integer", "minimum": 0, "maximum": 5},
+        "top_risks": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 5,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "severity", "mitigation"],
+                "properties": {
+                    "name": {"type": "string", "maxLength": 200},
+                    "severity": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "mitigation": {"type": "string", "maxLength": 500},
+                },
+            },
+        },
+        "fatal_flaws": {
+            "type": "array",
+            "items": {"type": "string", "maxLength": 500},
+            "default": [],
+        },
+        "build_window": {
+            "enum": ["4-6 weeks", "6-8 weeks", "8-12 weeks", "12+ weeks", "unknown"],
+        },
+        "next_steps": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 7,
+            "items": {"type": "string", "maxLength": 300},
+        },
+        "summary": {"type": "string", "maxLength": 2000},
+        "artifacts": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+        },
+    },
+}
+
+
+def _coerce_recommendation_for_fatal_flaws(response: dict[str, Any]) -> dict[str, Any]:
+    """Cross-field invariant enforcement: fatal_flaws non-empty implies
+    recommendation in {"kill", "pivot"}. JSON Schema can't express the
+    conditional; if the LLM violated it, override to "kill" and record
+    the original in a metadata field for the audit trail.
+    """
+    fatal = response.get("fatal_flaws") or []
+    rec = response.get("recommendation")
+    if fatal and rec not in {"kill", "pivot"}:
+        coerced = dict(response)
+        coerced["recommendation"] = "kill"
+        coerced["_coerced_from"] = rec
+        return coerced
+    return response
+
+
+def _escape_pipes(s: str) -> str:
+    """Escape `|` in GFM table cells."""
+    return s.replace("|", "\\|")
+
+
+def _render_validation_summary_markdown(response: dict[str, Any], slug: str) -> str:
+    """Render SYNTHESIZE_VALIDATION_SCHEMA output as _validation_summary.md
+    with a top-of-file YAML block followed by prose sections.
+    """
+    lines: list[str] = []
+    lines.append("---")
+    lines.append(f"slug: {slug}")
+    lines.append(f"recommendation: {response['recommendation']}")
+    lines.append(f"confidence: {response['confidence']}")
+    lines.append(f"build_window: {response['build_window']}")
+    lines.append(f"fatal_flaws_count: {len(response.get('fatal_flaws') or [])}")
+    if "_coerced_from" in response:
+        lines.append(f"recommendation_coerced_from: {response['_coerced_from']}")
+    lines.append("---")
+    lines.append("")
+    lines.append(f"# Validation summary: {slug}\n")
+    lines.append("## Recommendation\n")
+    lines.append(f"**{response['recommendation']}** (confidence {response['confidence']}/5)\n")
+    lines.append("## Summary\n")
+    lines.append(response["summary"])
+    lines.append("")
+
+    fatal = response.get("fatal_flaws") or []
+    if fatal:
+        lines.append("## Fatal flaws\n")
+        for item in fatal:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    risks = response.get("top_risks") or []
+    if risks:
+        lines.append("## Risk register\n")
+        lines.append("| # | Risk | Severity (1-5) | Mitigation |")
+        lines.append("|---|---|---|---|")
+        for i, r in enumerate(risks, 1):
+            lines.append(
+                f"| {i} | {_escape_pipes(r['name'])} | {r['severity']}"
+                f" | {_escape_pipes(r['mitigation'])} |"
+            )
+        lines.append("")
+
+    lines.append("## Next steps\n")
+    for step in response["next_steps"]:
+        lines.append(f"- {step}")
+    lines.append("")
+    return "\n".join(lines)
 
 
 _REQUEST_HUMAN_REVIEW_TOOL = "mcp__ai_team_tasks__request_human_review"
@@ -122,6 +252,8 @@ class QAEngineerAgent(BaseAgent):
         if not isinstance(incoming.payload, TaskAssignmentPayload):
             return []
         intent = (incoming.payload.inputs or {}).get("intent")
+        if intent == "synthesize_validation":
+            return self._build_synthesize_validation_outputs(response, incoming)
         if intent == "rank_brainstorm_candidates":
             return self._build_rank_outputs(response, incoming)
         return self._build_qa_report_outputs(response, incoming)
@@ -236,25 +368,115 @@ class QAEngineerAgent(BaseAgent):
         lines.append("")
         return "\n".join(lines)
 
+    def _build_synthesize_validation_outputs(
+        self, response: LLMResponse, incoming: AgentMessage
+    ) -> list[AgentMessage]:
+        assert isinstance(incoming.payload, TaskAssignmentPayload)
+        inputs = incoming.payload.inputs or {}
+        slug = str(inputs.get("slug", ""))
+        raw = response.structured or {}
+
+        if not raw or raw.get("intent_completed") != "synthesize_validation":
+            return [
+                self._fail_report(
+                    incoming,
+                    "missing or malformed structured_output",
+                    kind="validation synthesis",
+                )
+            ]
+
+        coerced = _coerce_recommendation_for_fatal_flaws(raw)
+
+        out_dir = _VALIDATE_DIR / slug
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = out_dir / "_validation_summary.md"
+            artifact_path.write_text(_render_validation_summary_markdown(coerced, slug=slug))
+        except OSError as e:
+            return [
+                self._fail_report(
+                    incoming,
+                    f"failed to write _validation_summary.md: {e}",
+                    kind="validation synthesis",
+                )
+            ]
+
+        artifact_rel = f"docs/products/{slug}/_validation_summary.md"
+        summary_text = str(
+            coerced.get("summary")
+            or (
+                f"{slug}: recommendation={coerced['recommendation']},"
+                f" confidence={coerced['confidence']},"
+                f" fatal_flaws={len(coerced.get('fatal_flaws') or [])}"
+            )
+        )
+        return [
+            AgentMessage(
+                correlation_id=incoming.correlation_id,
+                sender=AgentId.QA_ENGINEER,
+                recipient=AgentId.TEAM_LEAD,
+                message_type=MessageType.TASK_REPORT,
+                priority=incoming.priority,
+                payload=TaskReportPayload(
+                    task_id=incoming.payload.task_id,
+                    status=TaskStatus.DONE,
+                    progress_pct=100,
+                    summary=summary_text[:2_000],
+                    artifacts=[artifact_rel],
+                ),
+            )
+        ]
+
     async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
         if msg.message_type != MessageType.TASK_ASSIGNMENT:
             return []
         assert isinstance(msg.payload, TaskAssignmentPayload)
-        intent = (msg.payload.inputs or {}).get("intent")
-        schema = (
-            RANK_BRAINSTORM_SCHEMA if intent == "rank_brainstorm_candidates" else QA_REPORT_SCHEMA
-        )
-        response = await self._llm.invoke(
-            system_prompt=self.system_prompt(),
-            user_message=self._user_message_for(msg),
-            model=self.model_tier,
-            allowed_tools=self.allowed_tools,
-            session_id=str(msg.correlation_id),
-            timeout_s=self.llm_timeout_s,
-            max_turns=self.max_turns,
-            json_schema=schema,
-            env=dict(self.mcp_env) if self.mcp_env else None,
-        )
+        inputs = msg.payload.inputs or {}
+        intent = inputs.get("intent")
+
+        max_budget_usd: float | None = None
+
+        if intent == "synthesize_validation":
+            slug = str(inputs.get("slug", ""))
+            if not _SLUG_RE.match(slug):
+                return [
+                    self._fail_report(
+                        msg,
+                        f"input_validation — invalid slug {slug!r}",
+                        kind="validation synthesis",
+                    )
+                ]
+            schema: dict[str, object] = SYNTHESIZE_VALIDATION_SCHEMA
+            session_id = str(msg.payload.task_id)
+            max_budget_usd = 2.50
+            env: dict[str, str] = dict(self.mcp_env) or {}
+            env["AI_TEAM_PATH_PREFIXES"] = (
+                f"docs/sandbox/ideas,docs/market,docs/products/_candidates,docs/products/{slug}"
+            )
+        elif intent == "rank_brainstorm_candidates":
+            schema = RANK_BRAINSTORM_SCHEMA
+            session_id = str(msg.correlation_id)
+            env = dict(self.mcp_env) if self.mcp_env else {}
+        else:
+            schema = QA_REPORT_SCHEMA
+            session_id = str(msg.correlation_id)
+            env = dict(self.mcp_env) if self.mcp_env else {}
+
+        invoke_kwargs: dict[str, Any] = {
+            "system_prompt": self.system_prompt(),
+            "user_message": self._user_message_for(msg),
+            "model": self.model_tier,
+            "allowed_tools": self.allowed_tools,
+            "session_id": session_id,
+            "timeout_s": self.llm_timeout_s,
+            "max_turns": self.max_turns,
+            "json_schema": schema,
+            "env": env if env else None,
+        }
+        if max_budget_usd is not None:
+            invoke_kwargs["max_budget_usd"] = max_budget_usd
+
+        response = await self._llm.invoke(**invoke_kwargs)
         outputs = self._stamp_metrics(self.build_outputs(response, msg), response)
         await self._ensure_pending_review_row(response, msg)
         return outputs
@@ -339,5 +561,23 @@ class QAEngineerAgent(BaseAgent):
                 status=status,
                 progress_pct=100 if status == TaskStatus.DONE else 0,
                 summary=summary,
+            ),
+        )
+
+    def _fail_report(
+        self, incoming: AgentMessage, reason: str, *, kind: str = "QA report"
+    ) -> AgentMessage:
+        assert isinstance(incoming.payload, TaskAssignmentPayload)
+        return AgentMessage(
+            correlation_id=incoming.correlation_id,
+            sender=AgentId.QA_ENGINEER,
+            recipient=AgentId.TEAM_LEAD,
+            message_type=MessageType.TASK_REPORT,
+            priority=incoming.priority,
+            payload=TaskReportPayload(
+                task_id=incoming.payload.task_id,
+                status=TaskStatus.FAILED,
+                progress_pct=0,
+                summary=f"QA could not write {kind}: {reason}",
             ),
         )

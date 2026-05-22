@@ -1,0 +1,11 @@
+{
+  "owner_profile": "solo_developer",
+  "owner_languages": ["russian_native", "english_fluent"],
+  "owner_distribution_assets": "CIS_telegram_dev_channels",
+  "max_product_llm_opex_usd_per_day_per_user": 3,
+  "max_time_to_first_revenue_months": 6,
+  "max_total_dev_time_weeks": 12,
+  "max_paid_acquisition_cost_per_user_usd": 0,
+  "target_market": "developer_influencers_telegram_500_to_100k_subs",
+  "monetization_model": "subscription"
+}

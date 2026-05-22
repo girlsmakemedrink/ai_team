@@ -36,6 +36,8 @@ _IDEAS_DIR: Path = _REPO_ROOT / "docs" / "sandbox" / "ideas"
 
 _BRAINSTORM_DIR: Path = _REPO_ROOT / "docs" / "products" / "_candidates"
 
+_VALIDATE_DIR: Path = _REPO_ROOT / "docs" / "products"
+
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
@@ -174,6 +176,49 @@ BRAINSTORM_NICHE_SCHEMA: dict[str, object] = {
 }
 
 
+VALIDATE_COMPETITORS_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "intent_completed",
+        "competitors_found",
+        "pain_signals_found",
+        "distribution_feasibility",
+        "verdict",
+        "summary",
+        "artifacts",
+    ],
+    "properties": {
+        "intent_completed": {"const": "validate_competitors"},
+        "competitors_found": {"type": "integer", "minimum": 0},
+        "pain_signals_found": {"type": "integer", "minimum": 0},
+        "distribution_feasibility": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "channel_estimate",
+                "audience_reach_estimate",
+                "conversion_to_paid_estimate",
+                "notes",
+            ],
+            "properties": {
+                "channel_estimate": {"type": "string", "maxLength": 500},
+                "audience_reach_estimate": {"type": "string", "maxLength": 500},
+                "conversion_to_paid_estimate": {"type": "string", "maxLength": 500},
+                "notes": {"type": "string", "maxLength": 1000},
+            },
+        },
+        "verdict": {"enum": ["underserved", "saturated", "marginal"]},
+        "summary": {"type": "string", "maxLength": 2000},
+        "artifacts": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+        },
+    },
+}
+
+
 def _render_brainstorm_markdown(scan: dict[str, Any]) -> str:
     """Render BRAINSTORM_NICHE_SCHEMA output to human-readable Markdown."""
     lines: list[str] = [
@@ -222,6 +267,28 @@ def _render_brainstorm_markdown(scan: dict[str, Any]) -> str:
     lines.append("")
     for src in scan["research_sources_used"]:
         lines.append(f"- {src}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_competitors_markdown(response: dict[str, Any], slug: str) -> str:
+    """Render VALIDATE_COMPETITORS_SCHEMA output as competitors.md."""
+    lines: list[str] = []
+    lines.append(f"# Competitor scan: {slug}\n")
+    lines.append(f"- Competitors found: **{response['competitors_found']}**")
+    lines.append(f"- Pain signals found: **{response['pain_signals_found']}**")
+    lines.append(f"- Verdict: **{response['verdict']}**\n")
+    lines.append("## Summary\n")
+    lines.append(response["summary"])
+    lines.append("")
+    lines.append("## Distribution feasibility\n")
+    df = response["distribution_feasibility"]
+    lines.append(f"- **Channel estimate**: {df['channel_estimate']}")
+    lines.append(f"- **Audience reach estimate**: {df['audience_reach_estimate']}")
+    lines.append(f"- **Conversion-to-paid estimate**: {df['conversion_to_paid_estimate']}")
+    lines.append("")
+    lines.append("### Notes\n")
+    lines.append(df["notes"])
     lines.append("")
     return "\n".join(lines)
 
@@ -295,10 +362,57 @@ class MarketResearcherAgent(BaseAgent):
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if not isinstance(incoming.payload, TaskAssignmentPayload):
             return []
-        mode = (incoming.payload.inputs or {}).get("mode")
+        inputs = incoming.payload.inputs or {}
+        intent = inputs.get("intent")
+        mode = inputs.get("mode")
+        if intent == "validate_competitors":
+            return self._build_validate_competitors_outputs(response, incoming)
         if mode == "brainstorm_niche":
             return self._build_brainstorm_outputs(response, incoming)
         return self._build_scan_outputs(response, incoming)
+
+    def _build_validate_competitors_outputs(
+        self, response: LLMResponse, incoming: AgentMessage
+    ) -> list[AgentMessage]:
+        assert isinstance(incoming.payload, TaskAssignmentPayload)
+        inputs = incoming.payload.inputs or {}
+        slug = str(inputs.get("slug", ""))
+        scan = response.structured or {}
+
+        if not scan or scan.get("intent_completed") != "validate_competitors":
+            return [
+                self._fail(
+                    incoming,
+                    "validate_competitors: missing or malformed structured output",
+                )
+            ]
+
+        out_dir = _VALIDATE_DIR / slug
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = out_dir / "competitors.md"
+            artifact_path.write_text(_render_competitors_markdown(scan, slug=slug))
+        except OSError as e:
+            return [self._fail(incoming, f"failed to write competitors.md: {e}")]
+
+        artifact_rel = f"docs/products/{slug}/competitors.md"
+        summary = str(scan.get("summary") or "validate_competitors completed")
+        return [
+            AgentMessage(
+                correlation_id=incoming.correlation_id,
+                sender=AgentId.MARKET_RESEARCHER,
+                recipient=AgentId.TEAM_LEAD,
+                message_type=MessageType.TASK_REPORT,
+                priority=incoming.priority,
+                payload=TaskReportPayload(
+                    task_id=incoming.payload.task_id,
+                    status=TaskStatus.DONE,
+                    progress_pct=100,
+                    summary=summary[:2_000],
+                    artifacts=[artifact_rel],
+                ),
+            )
+        ]
 
     def _build_scan_outputs(
         self, response: LLMResponse, incoming: AgentMessage
@@ -415,25 +529,56 @@ class MarketResearcherAgent(BaseAgent):
         if msg.message_type != MessageType.TASK_ASSIGNMENT:
             return []
         assert isinstance(msg.payload, TaskAssignmentPayload)
-        mode = (msg.payload.inputs or {}).get("mode")
-        schema = BRAINSTORM_NICHE_SCHEMA if mode == "brainstorm_niche" else MARKET_SCAN_SCHEMA
-        # session_id: per-task for brainstorm (so 3 parallel niche runs do NOT
-        # collide on _claimed_sessions under one root correlation_id); per-
-        # correlation for the single-scan path (existing semantics preserved).
-        session_id = (
-            str(msg.payload.task_id) if mode == "brainstorm_niche" else str(msg.correlation_id)
-        )
-        response = await self._llm.invoke(
-            system_prompt=self.system_prompt(),
-            user_message=self._user_message_for(msg),
-            model=self.model_tier,
-            allowed_tools=self.allowed_tools,
-            session_id=session_id,
-            timeout_s=self.llm_timeout_s,
-            max_turns=self.max_turns,
-            json_schema=schema,
-            env=dict(self.mcp_env) if self.mcp_env else None,
-        )
+        inputs = msg.payload.inputs or {}
+        intent = inputs.get("intent")
+        mode = inputs.get("mode")
+
+        max_budget_usd: float | None = None
+
+        if intent == "validate_competitors":
+            slug = str(inputs.get("slug", ""))
+            if not _SLUG_RE.match(slug):
+                return [
+                    self._fail(
+                        msg,
+                        f"validate_competitors: input_validation — invalid slug {slug!r}",
+                    )
+                ]
+            schema: dict[str, object] = VALIDATE_COMPETITORS_SCHEMA
+            session_id = str(msg.payload.task_id)
+            max_budget_usd = 5.50
+            env: dict[str, str] | None = {
+                "AI_TEAM_PATH_PREFIXES": (
+                    f"docs/sandbox/ideas,docs/market,docs/products/_candidates,docs/products/{slug}"
+                ),
+            }
+        elif mode == "brainstorm_niche":
+            # session_id: per-task so 3 parallel niche runs do NOT
+            # collide on _claimed_sessions under one root correlation_id.
+            schema = BRAINSTORM_NICHE_SCHEMA
+            session_id = str(msg.payload.task_id)
+            env = dict(self.mcp_env) if self.mcp_env else None
+        else:
+            schema = MARKET_SCAN_SCHEMA
+            # per-correlation for the single-scan path (existing semantics).
+            session_id = str(msg.correlation_id)
+            env = dict(self.mcp_env) if self.mcp_env else None
+
+        invoke_kwargs: dict[str, Any] = {
+            "system_prompt": self.system_prompt(),
+            "user_message": self._user_message_for(msg),
+            "model": self.model_tier,
+            "allowed_tools": self.allowed_tools,
+            "session_id": session_id,
+            "timeout_s": self.llm_timeout_s,
+            "max_turns": self.max_turns,
+            "json_schema": schema,
+            "env": env,
+        }
+        if max_budget_usd is not None:
+            invoke_kwargs["max_budget_usd"] = max_budget_usd
+
+        response = await self._llm.invoke(**invoke_kwargs)
         return self._stamp_metrics(self.build_outputs(response, msg), response)
 
     def _fail(self, incoming: AgentMessage, reason: str) -> AgentMessage:
