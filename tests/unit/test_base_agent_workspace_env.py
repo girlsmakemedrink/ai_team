@@ -39,7 +39,7 @@ class _DummyAgent(BaseAgent):
     system_prompt_path = Path("/dev/null")
     allowed_tools = ()
 
-    def build_outputs(self, response, incoming):  # type: ignore[no-untyped-def]
+    def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         return []
 
     def system_prompt(self) -> str:
@@ -70,6 +70,12 @@ def test_build_env_includes_repo_root_when_workspace_in_metadata() -> None:
 def test_build_env_omits_repo_root_when_workspace_absent() -> None:
     agent = _DummyAgent(llm=_RecordingLLM())
     env = agent._build_env(_assignment(workspace=None))
+    assert "AI_TEAM_REPO_ROOT" not in env
+
+
+def test_build_env_omits_repo_root_for_empty_string_workspace() -> None:
+    agent = _DummyAgent(llm=_RecordingLLM())
+    env = agent._build_env(_assignment(workspace=""))
     assert "AI_TEAM_REPO_ROOT" not in env
 
 

@@ -129,7 +129,7 @@ class BaseAgent(ABC):
         # iter-29c: cross-repo workspace path stashed by the dispatcher
         # on msg.metadata['target_repo_workspace']. Backend's tripwire +
         # the MCP server read AI_TEAM_REPO_ROOT as their scope root.
-        workspace = msg.metadata.get("target_repo_workspace") if msg.metadata else None
+        workspace = msg.metadata.get("target_repo_workspace")
         if isinstance(workspace, str) and workspace:
             env["AI_TEAM_REPO_ROOT"] = workspace
         # Per-class mcp_env wins on key collisions (caller knows best
@@ -192,7 +192,7 @@ class BaseAgent(ABC):
         session_key: str | None = None,
     ) -> LLMResponse:
         env = self._build_env(msg)
-        workspace = msg.metadata.get("target_repo_workspace") if msg.metadata else None
+        workspace = msg.metadata.get("target_repo_workspace")
         cwd: str | None = workspace if isinstance(workspace, str) and workspace else None
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(3),
