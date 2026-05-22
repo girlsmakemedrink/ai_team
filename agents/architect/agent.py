@@ -150,6 +150,11 @@ VALIDATE_TECH_RISK_SCHEMA: dict[str, object] = {
 }
 
 
+def _escape_pipes(s: str) -> str:
+    """Escape `|` in GFM table cells."""
+    return s.replace("|", "\\|")
+
+
 def _render_tech_risk_markdown(response: dict[str, Any], slug: str) -> str:
     """Render VALIDATE_TECH_RISK_SCHEMA output as tech_risk.md."""
     lines: list[str] = []
@@ -167,10 +172,11 @@ def _render_tech_risk_markdown(response: dict[str, Any], slug: str) -> str:
     lines.append("| Name | Complexity (1-5) | Dependency | Scaling limit | Gotchas |")
     lines.append("|---|---|---|---|---|")
     for comp in response["components"]:
-        gotchas = "; ".join(comp.get("gotchas", []) or [])
+        gotchas_str = "; ".join(_escape_pipes(g) for g in (comp.get("gotchas") or []))
         lines.append(
-            f"| {comp['name']} | {comp['complexity']} | {comp['dependency']} | "
-            f"{comp['scaling_limit']} | {gotchas} |"
+            f"| {_escape_pipes(comp['name'])} | {comp['complexity']} | "
+            f"{_escape_pipes(comp['dependency'])} | "
+            f"{_escape_pipes(comp['scaling_limit'])} | {gotchas_str} |"
         )
     lines.append("")
     lines.append("## LLM opex at scale\n")
@@ -339,7 +345,8 @@ class ArchitectAgent(BaseAgent):
             return [
                 self._fail_report(
                     incoming,
-                    "validate_tech_risk: missing or malformed structured output",
+                    "missing or malformed structured_output",
+                    kind="tech-risk validation",
                 )
             ]
 
@@ -349,7 +356,13 @@ class ArchitectAgent(BaseAgent):
             artifact_path = out_dir / "tech_risk.md"
             artifact_path.write_text(_render_tech_risk_markdown(scan, slug=slug))
         except OSError as e:
-            return [self._fail_report(incoming, f"failed to write tech_risk.md: {e}")]
+            return [
+                self._fail_report(
+                    incoming,
+                    f"failed to write tech_risk.md: {e}",
+                    kind="tech-risk validation",
+                )
+            ]
 
         artifact_rel = f"docs/products/{slug}/tech_risk.md"
         summary = str(scan.get("summary") or "validate_tech_risk completed")
@@ -386,13 +399,14 @@ class ArchitectAgent(BaseAgent):
                     self._fail_report(
                         msg,
                         f"validate_tech_risk: input_validation — invalid slug {slug!r}",
+                        kind="tech-risk validation",
                     )
                 ]
             schema: dict[str, object] = VALIDATE_TECH_RISK_SCHEMA
             session_id = str(msg.payload.task_id)
             max_budget_usd = 4.50
             env: dict[str, str] | None = {
-                "AI_TEAM_PATH_PREFIXES": (f"docs/adr,docs/architecture,docs/products/{slug}"),
+                "AI_TEAM_PATH_PREFIXES": f"docs/adr,docs/architecture.md,docs/products/{slug}",
             }
         else:
             schema = ADR_SCHEMA
@@ -416,7 +430,9 @@ class ArchitectAgent(BaseAgent):
         response = await self._llm.invoke(**invoke_kwargs)
         return self._stamp_metrics(self.build_outputs(response, msg), response)
 
-    def _fail_report(self, incoming: AgentMessage, reason: str) -> AgentMessage:
+    def _fail_report(
+        self, incoming: AgentMessage, reason: str, *, kind: str = "ADR"
+    ) -> AgentMessage:
         assert isinstance(incoming.payload, TaskAssignmentPayload)
         return AgentMessage(
             correlation_id=incoming.correlation_id,
@@ -428,7 +444,7 @@ class ArchitectAgent(BaseAgent):
                 task_id=incoming.payload.task_id,
                 status=TaskStatus.FAILED,
                 progress_pct=0,
-                summary=f"Architect could not write ADR: {reason}",
+                summary=f"Architect could not write {kind}: {reason}",
             ),
         )
 

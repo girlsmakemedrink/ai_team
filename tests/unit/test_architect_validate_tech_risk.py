@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -288,3 +289,105 @@ async def test_handle_fails_on_invalid_slug(
     assert payload.status == TaskStatus.FAILED
     summary = (payload.summary or "").lower()
     assert "input_validation" in summary or "slug" in summary
+
+
+# ---------------------------------------------------------------------------
+# Helper: build a validate_tech_risk TASK_ASSIGNMENT for a given slug
+# ---------------------------------------------------------------------------
+
+
+def _validate_incoming(slug: str) -> AgentMessage:
+    return _make_assignment(
+        inputs={
+            "intent": "validate_tech_risk",
+            "slug": slug,
+            "candidate_brief": "...",
+            "constraints": {"owner_profile": "solo_developer"},
+        },
+        title=f"Validate tech-risk: {slug}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: env path-scope must use docs/architecture.md, not docs/architecture/
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_handle_validate_path_scope_includes_slug_and_excludes_arch_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("agents.architect.agent._REPO_ROOT", tmp_path)
+    monkeypatch.setattr("agents.architect.agent._VALIDATE_DIR", tmp_path / "docs" / "products")
+
+    stub = _StubLLM(_GOOD_OUTPUT)
+    agent = ArchitectAgent(llm=stub)
+    incoming = _validate_incoming("telegram-tech-publisher")
+    await agent.handle(incoming)
+
+    env = stub.last_kwargs.get("env") or {}
+    prefixes = env.get("AI_TEAM_PATH_PREFIXES", "")
+    assert "docs/architecture.md" in prefixes
+    assert "docs/architecture," not in prefixes  # dir prefix would be a regression
+    assert "docs/products/telegram-tech-publisher" in prefixes
+    assert "docs/adr" in prefixes
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: pipe chars in component fields must be escaped in GFM table rows
+# ---------------------------------------------------------------------------
+
+
+def test_render_escapes_pipe_chars_in_component_fields() -> None:
+    bad = {
+        **_GOOD_OUTPUT,
+        "components": [
+            {
+                "name": "Telegram|WhatsApp bridge",
+                "complexity": 3,
+                "dependency": "Bot API|Webhook",
+                "scaling_limit": "30 msg|sec",
+                "gotchas": ["watch | this"],
+            },
+            *_GOOD_OUTPUT["components"][:2],  # keep min items count at 3
+        ],
+    }
+    md = _render_tech_risk_markdown(bad, slug="telegram-tech-publisher")
+    # The bridge row must NOT have extra column separators
+    bridge_line = next(line for line in md.splitlines() if "Telegram" in line and "|" in line)
+    # GFM row: leading | + 5 field separators + trailing | = 6 unescaped pipes; the
+    # 4 fields with embedded | add 4 escaped \| which should NOT increase separator count.
+    unescaped_pipes = len(re.findall(r"(?<!\\)\|", bridge_line))
+    assert unescaped_pipes == 6, (
+        f"row should have 6 unescaped column separators, got {unescaped_pipes}: {bridge_line!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: _fail_report kind= — validate path must not say "ADR"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_validate_fail_summary_uses_validation_kind(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("agents.architect.agent._REPO_ROOT", tmp_path)
+    monkeypatch.setattr("agents.architect.agent._VALIDATE_DIR", tmp_path / "docs" / "products")
+
+    # Stub returns intent_completed mismatched → triggers _fail_report path
+    bad_response = {**_GOOD_OUTPUT, "intent_completed": "wrong"}
+    stub = _StubLLM(bad_response)
+    agent = ArchitectAgent(llm=stub)
+    incoming = _validate_incoming("telegram-tech-publisher")
+    outputs = await agent.handle(incoming)
+
+    reports = [m for m in outputs if m.message_type == MessageType.TASK_REPORT]
+    assert len(reports) == 1
+    payload = reports[0].payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status == TaskStatus.FAILED
+    assert "ADR" not in payload.summary, (
+        f"validate-path failure should not mention ADR, got: {payload.summary}"
+    )
+    assert "tech-risk" in payload.summary.lower() or "validation" in payload.summary.lower()
