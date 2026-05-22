@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -47,28 +48,28 @@ class _MinimalRepo(TargetRepo):
     """Implements the abstract surface with placeholders; only here to
     instantiate TargetRepo for testing the concrete no-op method."""
 
-    async def ensure_local_clone(self) -> Path:  # type: ignore[override]
+    async def ensure_local_clone(self) -> Path:
         return self.root
 
-    async def checkout(self, branch: str, *, base: str | None = None) -> None:  # type: ignore[override]
+    async def checkout(self, branch: str, *, base: str | None = None) -> None:
         return None
 
-    async def stage_and_commit(self, paths, message, author):  # type: ignore[override]
+    async def stage_and_commit(self, paths: Sequence[str], message: str, author: str) -> str:
         return "sha"
 
-    async def push(self, branch: str) -> None:  # type: ignore[override]
+    async def push(self, branch: str) -> None:
         return None
 
-    async def open_pr(self, *, head, base, title, body):  # type: ignore[override]
+    async def open_pr(self, *, head: str, base: str, title: str, body: str) -> PullRequest:
         raise NotImplementedError
 
-    async def run_tests(self, command=None):  # type: ignore[override]
+    async def run_tests(self, command: str | None = None) -> _TestRunResult:
         raise NotImplementedError
 
-    async def run_linter(self):  # type: ignore[override]
+    async def run_linter(self) -> LintRunResult:
         raise NotImplementedError
 
-    async def status(self):  # type: ignore[override]
+    async def status(self) -> RepoStatus:
         raise NotImplementedError
 
 
