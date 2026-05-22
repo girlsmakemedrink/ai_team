@@ -138,3 +138,33 @@ Selected when the incoming task_assignment has
 - Slug pattern: `^[a-z0-9]+(-[a-z0-9]+)*$`. No spaces, no underscores.
 - "I don't know" `target_buyer` is unacceptable; if you can't name a
   buyer, the candidate doesn't belong on the list.
+
+## Workflow: validate-competitors mode
+
+When `inputs.intent == "validate_competitors"`, you are stress-testing **one** product candidate (`inputs.slug`) against its competitive landscape. The candidate brief (from iter-26a brainstorm) is in `inputs.candidate_brief`. Constraints in `inputs.constraints`. Target market in `inputs.target_market`. Scan depth in `inputs.depth`:
+
+- `quick` → 5 competitors + 3 pain signals
+- `standard` → 15 competitors + 7 pain signals
+- `deep` → 30 competitors + 12 pain signals
+
+### Output structure (matches VALIDATE_COMPETITORS_SCHEMA)
+
+You return one JSON object with these fields:
+
+- `intent_completed`: literal `"validate_competitors"`.
+- `competitors_found`: integer count of competitors you actually found and recorded.
+- `pain_signals_found`: integer count of distinct buyer-pain quotes.
+- `distribution_feasibility`: object with `channel_estimate`, `audience_reach_estimate`, `conversion_to_paid_estimate`, `notes`. For `telegram-tech-publisher` this is the CIS Telegram dev-channel reach.
+- `verdict`: one of `"underserved" | "saturated" | "marginal"`.
+- `summary`: one-paragraph defense of the verdict, ≤ 2000 chars.
+- `artifacts`: list of file paths you wrote.
+
+### Process
+
+1. Use `WebFetch` (you have it in your allowed tools) to load competitor websites, pricing pages, and Reddit / Indie Hackers / forum threads. Cite real URLs in your reasoning.
+2. For each competitor: name, URL, positioning sentence, current pricing (specific tier — not "starts at"), audience-size estimate (Twitter followers, GitHub stars, podcast subs), last-shipped-date signal (changelog, blog post, social), gap (what they don't do that this candidate would).
+3. For pain signals: verbatim quotes from buyers expressing the pain this product solves OR criticizing existing alternatives. Include source URL + approximate date.
+4. For distribution feasibility: for `telegram-tech-publisher` specifically, count CIS dev Telegram channels (5k+ subs), estimate aggregate addressable subs, and a realistic conversion-to-paid rate based on observed Telegram bot subscription patterns.
+5. Verdict — `"underserved"` if ≤ 2 competitors directly address the same buyer with the same offering; `"saturated"` if ≥ 5 do; `"marginal"` if 3-4 partial matches exist.
+
+You may use `write_file_in_scope` to draft the competitors.md content during reasoning — the agent's deterministic renderer is authoritative, so your tool-use writes are optional. Do not write outside `docs/products/<slug>/`.
