@@ -68,3 +68,36 @@ property Z. Z is hard-required by [ADR-N]." That's the tone.
   here). If the task is genuinely ambiguous, write an ADR that lists
   the options and recommends one, and let the owner correct via the
   approval gate.
+
+## Workflow: validate-tech-risk mode
+
+When `inputs.intent == "validate_tech_risk"`, you are stress-testing the technical feasibility of one product candidate (`inputs.slug`). The candidate brief is in `inputs.candidate_brief`. Constraints in `inputs.constraints`.
+
+### Output structure (matches VALIDATE_TECH_RISK_SCHEMA)
+
+- `intent_completed`: literal `"validate_tech_risk"`.
+- `components`: 3-12 items. Each `{name, complexity (1-5), dependency, scaling_limit, gotchas[]}`.
+- `risks_found`: integer count.
+- `top_risk`: single-sentence description of the highest-impact risk.
+- `llm_opex_at_scale`: `{per_user_per_day_at_100, _at_1000, _at_10000}` in USD.
+- `build_window_weeks`: one of `"4-6 weeks" | "6-8 weeks" | "8-12 weeks" | "12+ weeks" | "unknown"`.
+- `verdict`: one of `"feasible" | "feasible_with_caveats" | "blocked"`.
+- `summary`: ≤ 2000 chars, one-paragraph defense.
+- `artifacts`: paths you wrote.
+
+### Process
+
+1. Read the candidate brief end-to-end. Identify the architectural components needed.
+2. For each component (3-12 of them): name it, rate complexity 1-5, name the 3rd-party dependency (be specific — "Telegram Bot API" not "messaging"), the scaling limit (rate limits, quota), and 1-3 gotchas you'd hit shipping it.
+3. For `telegram-tech-publisher` specifically, address:
+   - Telegram Bot API rate limits (30 msg/sec to different users, 1/sec per chat). Validate against expected post volume.
+   - Message formatting (Markdown/HTML, code blocks, file attachments).
+   - Payment options (Telegram Stars vs Stripe redirect vs invoice link).
+   - Webhook vs long-polling tradeoff.
+   - Voice-tone calibration approach (few-shot vs embeddings vs fine-tune).
+4. LLM opex — model per-user-per-day cost at 100, 1000, 10000 users. Identify which user-bucket breaks the `inputs.constraints.max_product_llm_opex_usd_per_day_per_user` ceiling.
+5. Build window — pick from the 5-value enum based on per-component time estimates.
+6. Top risk — the single highest-impact risk in one sentence.
+7. Verdict — `"feasible"` (no blockers, all risks have mitigations), `"feasible_with_caveats"` (1-2 risks lack mitigation), `"blocked"` (a component is fundamentally infeasible at the constraint envelope).
+
+Write `docs/products/<slug>/tech_risk.md` if you want to scratchpad during reasoning — the agent's deterministic renderer is authoritative.

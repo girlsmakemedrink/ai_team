@@ -34,6 +34,7 @@ _log = structlog.get_logger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 # Mutable module-level so tests can monkeypatch it without subclassing.
 _ADR_DIR: Path = _REPO_ROOT / "docs" / "adr"
+_VALIDATE_DIR: Path = _REPO_ROOT / "docs" / "products"
 
 _ADR_FILENAME_RE = re.compile(r"^(\d{4})-.*\.md$")
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -81,6 +82,104 @@ ADR_SCHEMA: dict[str, object] = {
         "references": {"type": "array", "items": {"type": "string"}},
     },
 }
+
+
+VALIDATE_TECH_RISK_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "intent_completed",
+        "components",
+        "risks_found",
+        "top_risk",
+        "llm_opex_at_scale",
+        "build_window_weeks",
+        "verdict",
+        "summary",
+        "artifacts",
+    ],
+    "properties": {
+        "intent_completed": {"const": "validate_tech_risk"},
+        "components": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 12,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "complexity", "dependency", "scaling_limit", "gotchas"],
+                "properties": {
+                    "name": {"type": "string", "maxLength": 200},
+                    "complexity": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "dependency": {"type": "string", "maxLength": 300},
+                    "scaling_limit": {"type": "string", "maxLength": 300},
+                    "gotchas": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 300},
+                    },
+                },
+            },
+        },
+        "risks_found": {"type": "integer", "minimum": 0},
+        "top_risk": {"type": "string", "maxLength": 500},
+        "llm_opex_at_scale": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "per_user_per_day_at_100",
+                "per_user_per_day_at_1000",
+                "per_user_per_day_at_10000",
+            ],
+            "properties": {
+                "per_user_per_day_at_100": {"type": "number", "minimum": 0},
+                "per_user_per_day_at_1000": {"type": "number", "minimum": 0},
+                "per_user_per_day_at_10000": {"type": "number", "minimum": 0},
+            },
+        },
+        "build_window_weeks": {
+            "enum": ["4-6 weeks", "6-8 weeks", "8-12 weeks", "12+ weeks", "unknown"],
+        },
+        "verdict": {"enum": ["feasible", "feasible_with_caveats", "blocked"]},
+        "summary": {"type": "string", "maxLength": 2000},
+        "artifacts": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+        },
+    },
+}
+
+
+def _render_tech_risk_markdown(response: dict[str, Any], slug: str) -> str:
+    """Render VALIDATE_TECH_RISK_SCHEMA output as tech_risk.md."""
+    lines: list[str] = []
+    lines.append(f"# Tech-risk register: {slug}\n")
+    lines.append(f"- Verdict: **{response['verdict']}**")
+    lines.append(f"- Build window: **{response['build_window_weeks']}**")
+    lines.append(f"- Risks found: **{response['risks_found']}**\n")
+    lines.append("## Summary\n")
+    lines.append(response["summary"])
+    lines.append("")
+    lines.append("## Top risk\n")
+    lines.append(response["top_risk"])
+    lines.append("")
+    lines.append("## Components\n")
+    lines.append("| Name | Complexity (1-5) | Dependency | Scaling limit | Gotchas |")
+    lines.append("|---|---|---|---|---|")
+    for comp in response["components"]:
+        gotchas = "; ".join(comp.get("gotchas", []) or [])
+        lines.append(
+            f"| {comp['name']} | {comp['complexity']} | {comp['dependency']} | "
+            f"{comp['scaling_limit']} | {gotchas} |"
+        )
+    lines.append("")
+    lines.append("## LLM opex at scale\n")
+    opex = response["llm_opex_at_scale"]
+    lines.append(f"- 100 users:    ${opex['per_user_per_day_at_100']:.2f} / user / day")
+    lines.append(f"- 1000 users:   ${opex['per_user_per_day_at_1000']:.2f} / user / day")
+    lines.append(f"- 10000 users:  ${opex['per_user_per_day_at_10000']:.2f} / user / day")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _next_adr_number(adr_dir: Path) -> int:
@@ -178,6 +277,12 @@ class ArchitectAgent(BaseAgent):
         if not isinstance(incoming.payload, TaskAssignmentPayload):
             return []
 
+        inputs = incoming.payload.inputs or {}
+        intent = inputs.get("intent")
+
+        if intent == "validate_tech_risk":
+            return self._build_validate_tech_risk_outputs(response, incoming)
+
         adr = response.structured
         if not adr or "title" not in adr or "slug" not in adr:
             return [self._fail_report(incoming, "LLM did not return a parseable ADR")]
@@ -222,20 +327,93 @@ class ArchitectAgent(BaseAgent):
             )
         ]
 
+    def _build_validate_tech_risk_outputs(
+        self, response: LLMResponse, incoming: AgentMessage
+    ) -> list[AgentMessage]:
+        assert isinstance(incoming.payload, TaskAssignmentPayload)
+        inputs = incoming.payload.inputs or {}
+        slug = str(inputs.get("slug", ""))
+        scan = response.structured or {}
+
+        if not scan or scan.get("intent_completed") != "validate_tech_risk":
+            return [
+                self._fail_report(
+                    incoming,
+                    "validate_tech_risk: missing or malformed structured output",
+                )
+            ]
+
+        out_dir = _VALIDATE_DIR / slug
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = out_dir / "tech_risk.md"
+            artifact_path.write_text(_render_tech_risk_markdown(scan, slug=slug))
+        except OSError as e:
+            return [self._fail_report(incoming, f"failed to write tech_risk.md: {e}")]
+
+        artifact_rel = f"docs/products/{slug}/tech_risk.md"
+        summary = str(scan.get("summary") or "validate_tech_risk completed")
+        return [
+            AgentMessage(
+                correlation_id=incoming.correlation_id,
+                sender=AgentId.ARCHITECT,
+                recipient=AgentId.TEAM_LEAD,
+                message_type=MessageType.TASK_REPORT,
+                priority=incoming.priority,
+                payload=TaskReportPayload(
+                    task_id=incoming.payload.task_id,
+                    status=TaskStatus.DONE,
+                    progress_pct=100,
+                    summary=summary[:2_000],
+                    artifacts=[artifact_rel],
+                ),
+            )
+        ]
+
     async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
         if msg.message_type != MessageType.TASK_ASSIGNMENT:
             return []
-        response = await self._llm.invoke(
-            system_prompt=self.system_prompt(),
-            user_message=self._user_message_for(msg),
-            model=self.model_tier,
-            allowed_tools=self.allowed_tools,
-            session_id=str(msg.correlation_id),
-            timeout_s=self.llm_timeout_s,
-            max_turns=self.max_turns,
-            json_schema=ADR_SCHEMA,
-            env=dict(self.mcp_env) if self.mcp_env else None,
-        )
+        assert isinstance(msg.payload, TaskAssignmentPayload)
+        inputs = msg.payload.inputs or {}
+        intent = inputs.get("intent")
+
+        max_budget_usd: float | None = None
+
+        if intent == "validate_tech_risk":
+            slug = str(inputs.get("slug", ""))
+            if not _SLUG_RE.match(slug):
+                return [
+                    self._fail_report(
+                        msg,
+                        f"validate_tech_risk: input_validation — invalid slug {slug!r}",
+                    )
+                ]
+            schema: dict[str, object] = VALIDATE_TECH_RISK_SCHEMA
+            session_id = str(msg.payload.task_id)
+            max_budget_usd = 4.50
+            env: dict[str, str] | None = {
+                "AI_TEAM_PATH_PREFIXES": (f"docs/adr,docs/architecture,docs/products/{slug}"),
+            }
+        else:
+            schema = ADR_SCHEMA
+            session_id = str(msg.correlation_id)
+            env = dict(self.mcp_env) if self.mcp_env else None
+
+        invoke_kwargs: dict[str, Any] = {
+            "system_prompt": self.system_prompt(),
+            "user_message": self._user_message_for(msg),
+            "model": self.model_tier,
+            "allowed_tools": self.allowed_tools,
+            "session_id": session_id,
+            "timeout_s": self.llm_timeout_s,
+            "max_turns": self.max_turns,
+            "json_schema": schema,
+            "env": env,
+        }
+        if max_budget_usd is not None:
+            invoke_kwargs["max_budget_usd"] = max_budget_usd
+
+        response = await self._llm.invoke(**invoke_kwargs)
         return self._stamp_metrics(self.build_outputs(response, msg), response)
 
     def _fail_report(self, incoming: AgentMessage, reason: str) -> AgentMessage:
