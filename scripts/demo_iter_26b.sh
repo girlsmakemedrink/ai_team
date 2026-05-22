@@ -30,7 +30,7 @@ bail() { printf "\033[1;31m✗ %s\033[0m\n" "$*" >&2; exit 1; }
 
 SLUG="${1:-telegram-tech-publisher}"
 DEPTH="${2:-standard}"
-CANDIDATE_FILE="${CANDIDATE_FILE:-docs/products/_candidates/_brainstorm_creator_tools.md}"
+CANDIDATE_FILE="${CANDIDATE_FILE:-docs/products/_candidates/creator_tools.md}"
 CONSTRAINTS_JSON="${CONSTRAINTS_JSON:-scripts/iter_26b_constraints.json}"
 
 [ -f .env ]                               || bail ".env not found. Run \`make dev\` first."
@@ -105,7 +105,12 @@ SUBMIT_OUT=$(uv run ai-team validate-product \
     --depth "$DEPTH" \
     --constraints-json "$CONSTRAINTS_JSON" 2>&1)
 echo "$SUBMIT_OUT"
-CORRELATION=$(echo "$SUBMIT_OUT" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+# The submit panel prints BOTH task_id and correlation_id as UUIDs; match the
+# correlation_id line specifically so we don't accidentally pick task_id (Rich
+# panel order is task_id first → blind `head -1` would grab the wrong UUID).
+CORRELATION=$(echo "$SUBMIT_OUT" \
+    | sed -nE 's/.*correlation_id:[[:space:]]+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}).*/\1/p' \
+    | head -1)
 [ -n "$CORRELATION" ] || bail "could not parse correlation_id from CLI output"
 ok "submitted (correlation $CORRELATION)"
 

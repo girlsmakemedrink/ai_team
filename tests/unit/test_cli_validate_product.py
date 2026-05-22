@@ -110,6 +110,8 @@ def test_validate_product_posts_with_expected_inputs(tmp_path: Path) -> None:
     posted_json = post_mock.call_args.kwargs["json"]
     assert posted_json["title"] == "Validate product: telegram-tech-publisher"
     assert "**Slug:** telegram-tech-publisher" in posted_json["description"]
+    # API rejects lowercase "p2" with 422 (Priority enum is P1..P4).
+    assert posted_json["priority"] == "P2"
     inputs = posted_json["inputs"]
     assert inputs["intent"] == "validate_product"
     assert inputs["slug"] == "telegram-tech-publisher"
