@@ -2,9 +2,8 @@
 
 See ADR-009. The dispatcher resolves the optional
 `TaskAssignmentPayload.target_repo` field via this factory before
-forwarding the task to an agent. `GitHubTargetRepo` is intentionally
-not implemented this iteration — the iter-2 scope is the self-bootstrap
-and in-repo-example cases.
+forwarding the task to an agent. iter-28 closes the `GitHubTargetRepo`
+branch (the third concrete impl).
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from core.target_repo.github import GitHubTargetRepo
 from core.target_repo.in_repo_example import InRepoExampleTargetRepo
 from core.target_repo.self_bootstrap import SelfBootstrapTargetRepo
 
@@ -31,13 +31,17 @@ _IN_REPO_EXAMPLES: dict[str, tuple[str, str]] = {
 _GITHUB_RE = re.compile(r"^([a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+|https?://.+)$")
 
 
-def resolve_target_repo(identifier: str | None, *, ai_team_root: Path) -> SelfBootstrapTargetRepo:
+def resolve_target_repo(
+    identifier: str | None,
+    *,
+    ai_team_root: Path,
+) -> SelfBootstrapTargetRepo | GitHubTargetRepo:
     """Return a TargetRepo instance for the given identifier.
 
     - None → SelfBootstrapTargetRepo at `ai_team_root`.
     - A key in `_IN_REPO_EXAMPLES` → InRepoExampleTargetRepo.
-    - `owner/repo` or a URL → NotImplementedError (deferred to first
-      commercial product).
+    - `owner/repo` or a URL → GitHubTargetRepo (workspaces under
+      ~/.ai_team/workspaces/<owner>--<repo>/).
     - Anything else → ValueError.
     """
     if identifier is None:
@@ -48,13 +52,10 @@ def resolve_target_repo(identifier: str | None, *, ai_team_root: Path) -> SelfBo
         return InRepoExampleTargetRepo(root=ai_team_root / rel, name=name)
 
     if _GITHUB_RE.match(identifier):
-        raise NotImplementedError(
-            "GitHubTargetRepo is deferred until the first commercial product. "
-            f"Got identifier: {identifier!r}"
-        )
+        return GitHubTargetRepo(identifier)
 
     raise ValueError(
         f"unknown target_repo {identifier!r}; "
         f"allowed: None, {sorted(_IN_REPO_EXAMPLES)}, "
-        "or owner/repo / URL (not yet supported)"
+        "or owner/repo / URL"
     )

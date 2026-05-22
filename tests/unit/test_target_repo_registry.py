@@ -6,7 +6,7 @@ to a concrete `TargetRepo` instance. Three input shapes are recognized:
 - `None`                                      → SelfBootstrapTargetRepo
 - `"examples/sandbox/idea-validator"`         → InRepoExampleTargetRepo
 - `"<owner>/<repo>"` or `"https://github.com/…"`
-                                              → NotImplementedError (deferred)
+                                              → GitHubTargetRepo (workspaces dir)
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from core.target_repo.github import GitHubTargetRepo
 from core.target_repo.in_repo_example import InRepoExampleTargetRepo
 from core.target_repo.registry import resolve_target_repo
 from core.target_repo.self_bootstrap import SelfBootstrapTargetRepo
@@ -41,14 +42,19 @@ def test_resolve_idea_validator_returns_in_repo_example(tmp_path: Path) -> None:
     assert repo.remote_url is None
 
 
-def test_resolve_owner_slash_repo_not_yet_supported(tmp_path: Path) -> None:
-    with pytest.raises(NotImplementedError, match="GitHubTargetRepo"):
-        resolve_target_repo("girlsmakemedrink/some-product", ai_team_root=tmp_path)
+def test_resolve_owner_slash_repo_returns_github_target_repo(tmp_path: Path) -> None:
+    repo = resolve_target_repo("girlsmakemedrink/telegram-tech-publisher", ai_team_root=tmp_path)
+    assert isinstance(repo, GitHubTargetRepo)
+    assert repo.name == "girlsmakemedrink/telegram-tech-publisher"
+    assert repo.remote_url == "git@github.com:girlsmakemedrink/telegram-tech-publisher.git"
 
 
-def test_resolve_github_url_not_yet_supported(tmp_path: Path) -> None:
-    with pytest.raises(NotImplementedError, match="GitHubTargetRepo"):
-        resolve_target_repo("https://github.com/girlsmakemedrink/x", ai_team_root=tmp_path)
+def test_resolve_github_url_returns_github_target_repo(tmp_path: Path) -> None:
+    repo = resolve_target_repo(
+        "https://github.com/girlsmakemedrink/telegram-tech-publisher", ai_team_root=tmp_path
+    )
+    assert isinstance(repo, GitHubTargetRepo)
+    assert repo.name == "girlsmakemedrink/telegram-tech-publisher"
 
 
 def test_resolve_unknown_in_repo_path_rejected(tmp_path: Path) -> None:
