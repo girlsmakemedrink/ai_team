@@ -35,6 +35,7 @@ class ClaudeAgentSDKClient:
         json_schema: dict[str, Any] | None = None,
         max_budget_usd: float | None = None,
         env: dict[str, str] | None = None,
+        cwd: str | None = None,
     ) -> LLMResponse:
         raise NotImplementedError(
             "Claude Agent SDK backend pending subscription-auth support; "

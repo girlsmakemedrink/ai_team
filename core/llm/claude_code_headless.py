@@ -161,6 +161,7 @@ class ClaudeCodeHeadlessClient:
         json_schema: dict[str, Any] | None = None,
         max_budget_usd: float | None = None,
         env: dict[str, str] | None = None,
+        cwd: str | None = None,
     ) -> LLMResponse:
         model_id = _resolve_model_id(model)
         effective_budget = (
@@ -233,7 +234,7 @@ class ClaudeCodeHeadlessClient:
         effective_env = {**os.environ, **env} if env else None
 
         returncode, stdout, stderr = await self._spawn_once(
-            cmd, timeout_s=timeout_s, env=effective_env, log=log
+            cmd, timeout_s=timeout_s, env=effective_env, cwd=cwd, log=log
         )
 
         # iter-13: session-id collision under dispatcher restart. The
@@ -262,7 +263,7 @@ class ClaudeCodeHeadlessClient:
             # first spawn — they go straight to --resume.
             self._claimed_sessions.add(session_id)
             returncode, stdout, stderr = await self._spawn_once(
-                cmd, timeout_s=timeout_s, env=effective_env, log=log
+                cmd, timeout_s=timeout_s, env=effective_env, cwd=cwd, log=log
             )
 
         duration_ms = int((time.perf_counter() - start) * 1000)
@@ -323,6 +324,7 @@ class ClaudeCodeHeadlessClient:
         *,
         timeout_s: int,
         env: dict[str, str] | None,
+        cwd: str | None,
         log: Any,
     ) -> tuple[int, bytes, bytes]:
         """Spawn claude -p once. Return (returncode, stdout, stderr).
@@ -338,6 +340,7 @@ class ClaudeCodeHeadlessClient:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                cwd=cwd,
             )
         except FileNotFoundError as e:
             raise LLMInvocationError(
