@@ -34,6 +34,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # via a `destination` field — kept simple for iter-2b).
 _IDEAS_DIR: Path = _REPO_ROOT / "docs" / "sandbox" / "ideas"
 
+_BRAINSTORM_DIR: Path = _REPO_ROOT / "docs" / "products" / "_candidates"
+
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
@@ -275,9 +277,9 @@ class MarketResearcherAgent(BaseAgent):
         "mcp__ai_team_tasks__request_human_review",
     )
     system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "market_researcher.md"
-    # Per ADR-004: writes only to ideas/ and market/.
+    # Per ADR-004: writes only to ideas/, market/, and products/.
     mcp_env: ClassVar[dict[str, str]] = {
-        "AI_TEAM_PATH_PREFIXES": "docs/sandbox/ideas,docs/market",
+        "AI_TEAM_PATH_PREFIXES": "docs/sandbox/ideas,docs/market,docs/products",
     }
     llm_timeout_s: ClassVar[int] = 300
     max_turns: ClassVar[int] = 15
@@ -285,7 +287,15 @@ class MarketResearcherAgent(BaseAgent):
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
         if not isinstance(incoming.payload, TaskAssignmentPayload):
             return []
+        mode = (incoming.payload.inputs or {}).get("mode")
+        if mode == "brainstorm_niche":
+            return self._build_brainstorm_outputs(response, incoming)
+        return self._build_scan_outputs(response, incoming)
 
+    def _build_scan_outputs(
+        self, response: LLMResponse, incoming: AgentMessage
+    ) -> list[AgentMessage]:
+        assert isinstance(incoming.payload, TaskAssignmentPayload)
         scan = response.structured
         if not scan or "title" not in scan or "slug" not in scan:
             return [self._fail(incoming, "LLM did not return a parseable market scan")]
@@ -304,7 +314,6 @@ class MarketResearcherAgent(BaseAgent):
         artifact_rel = f"docs/sandbox/ideas/{filename}"
         score = scan.get("viability_score", "?")
         summary = f"{scan['title']} — viability {score}/10"
-        assert isinstance(incoming.payload, TaskAssignmentPayload)
         return [
             AgentMessage(
                 correlation_id=incoming.correlation_id,
@@ -322,18 +331,92 @@ class MarketResearcherAgent(BaseAgent):
             )
         ]
 
+    def _build_brainstorm_outputs(
+        self, response: LLMResponse, incoming: AgentMessage
+    ) -> list[AgentMessage]:
+        assert isinstance(incoming.payload, TaskAssignmentPayload)
+        scan = response.structured
+        if not scan or "niche" not in scan or "candidates" not in scan:
+            return [self._fail(incoming, "LLM did not return a parseable brainstorm")]
+
+        niche = str(scan["niche"])
+        candidates = scan.get("candidates") or []
+        candidate_slugs = {c.get("slug") for c in candidates}
+        top_3 = scan.get("researcher_top_3_slugs") or []
+        if not set(top_3).issubset(candidate_slugs):
+            missing = set(top_3) - candidate_slugs
+            return [self._fail(
+                incoming,
+                f"researcher_top_3 references unknown slugs: {sorted(missing)}",
+            )]
+
+        # composite_score must equal sum of axes
+        for cand in candidates:
+            scores = cand.get("scores") or {}
+            expected = sum(scores.get(k, 0) for k in (
+                "tam_signal", "solo_fit", "llm_opex_fit",
+                "defensibility", "time_to_first_revenue",
+            ))
+            if cand.get("composite_score") != expected:
+                return [self._fail(
+                    incoming,
+                    f"composite_score mismatch for {cand.get('slug')!r}: "
+                    f"got {cand.get('composite_score')}, expected sum {expected}",
+                )]
+
+        filename = f"_brainstorm_{niche}.md"
+        try:
+            _BRAINSTORM_DIR.mkdir(parents=True, exist_ok=True)
+            (_BRAINSTORM_DIR / filename).write_text(_render_brainstorm_markdown(scan))
+        except OSError as e:
+            return [self._fail(incoming, f"failed to write brainstorm: {e}")]
+
+        artifact_rel = f"docs/products/_candidates/{filename}"
+        top_titles = ", ".join(
+            next(c["title"] for c in candidates if c["slug"] == s) for s in top_3
+        )
+        summary = f"Brainstorm {niche}: 5 candidates; researcher top-3: {top_titles}"
+        return [
+            AgentMessage(
+                correlation_id=incoming.correlation_id,
+                sender=AgentId.MARKET_RESEARCHER,
+                recipient=AgentId.TEAM_LEAD,
+                message_type=MessageType.TASK_REPORT,
+                priority=incoming.priority,
+                payload=TaskReportPayload(
+                    task_id=incoming.payload.task_id,
+                    status=TaskStatus.DONE,
+                    progress_pct=100,
+                    summary=summary[:2_000],
+                    artifacts=[artifact_rel],
+                ),
+            )
+        ]
+
     async def handle(self, msg: AgentMessage) -> list[AgentMessage]:
         if msg.message_type != MessageType.TASK_ASSIGNMENT:
             return []
+        assert isinstance(msg.payload, TaskAssignmentPayload)
+        mode = (msg.payload.inputs or {}).get("mode")
+        schema = (
+            BRAINSTORM_NICHE_SCHEMA if mode == "brainstorm_niche" else MARKET_SCAN_SCHEMA
+        )
+        # session_id: per-task for brainstorm (so 3 parallel niche runs do NOT
+        # collide on _claimed_sessions under one root correlation_id); per-
+        # correlation for the single-scan path (existing semantics preserved).
+        session_id = (
+            str(msg.payload.task_id) if mode == "brainstorm_niche"
+            else str(msg.correlation_id)
+        )
         response = await self._llm.invoke(
             system_prompt=self.system_prompt(),
             user_message=self._user_message_for(msg),
             model=self.model_tier,
             allowed_tools=self.allowed_tools,
-            session_id=str(msg.correlation_id),
+            session_id=session_id,
             timeout_s=self.llm_timeout_s,
             max_turns=self.max_turns,
-            json_schema=MARKET_SCAN_SCHEMA,
+            json_schema=schema,
             env=dict(self.mcp_env) if self.mcp_env else None,
         )
         return self._stamp_metrics(self.build_outputs(response, msg), response)
