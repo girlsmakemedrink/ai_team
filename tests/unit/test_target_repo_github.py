@@ -78,7 +78,7 @@ def test_default_branch_can_be_overridden(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_ensure_local_clone_clones_when_missing(tmp_path: Path) -> None:
-    """First call clones; workspace dir gets created."""
+    """First call clones via `gh repo clone`; workspace dir gets created."""
     repo = GitHubTargetRepo("girlsmakemedrink/telegram-tech-publisher", workspaces_dir=tmp_path)
     with patch("core.target_repo.github._run", new_callable=AsyncMock) as mock_run:
 
@@ -91,12 +91,13 @@ async def test_ensure_local_clone_clones_when_missing(tmp_path: Path) -> None:
         result = await repo.ensure_local_clone()
     assert result == repo.root
     assert (repo.root / ".git").is_dir()
-    # First call invokes `git clone <ssh_url> <dest>`.
+    # First call invokes `gh repo clone <owner>/<repo> <dest>`.
     assert mock_run.await_args is not None
     args = mock_run.await_args.args
-    assert args[0] == "git"
-    assert args[1] == "clone"
-    assert args[2] == "git@github.com:girlsmakemedrink/telegram-tech-publisher.git"
+    assert args[0] == "gh"
+    assert args[1] == "repo"
+    assert args[2] == "clone"
+    assert args[3] == "girlsmakemedrink/telegram-tech-publisher"
 
 
 @pytest.mark.asyncio
@@ -121,5 +122,5 @@ async def test_ensure_local_clone_raises_on_clone_failure(tmp_path: Path) -> Non
     repo = GitHubTargetRepo("girlsmakemedrink/telegram-tech-publisher", workspaces_dir=tmp_path)
     with patch("core.target_repo.github._run", new_callable=AsyncMock) as mock_run:
         mock_run.return_value = (128, "", "fatal: repo not found")
-        with pytest.raises(GitCommandError, match="git clone failed"):
+        with pytest.raises(GitCommandError, match="gh repo clone failed"):
             await repo.ensure_local_clone()

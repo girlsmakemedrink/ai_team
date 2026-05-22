@@ -48,8 +48,10 @@ class GitHubTargetRepo(SelfBootstrapTargetRepo):
       workspace path under `~/.ai_team/workspaces/<owner>--<repo>/`.
     - `ensure_local_clone` clones on first call, fetches on subsequent.
 
-    Auth: owner's SSH key for clone/push; owner's `gh` CLI for `open_pr`
-    (inherited from parent).
+    Auth: `gh` CLI handles both clone and PR creation; clone protocol
+    (https / ssh) follows `gh config get -h github.com git_protocol`.
+    `push` uses whatever `origin` was set by `gh repo clone`, so it
+    inherits the same credential helper.
     """
 
     def __init__(
@@ -65,6 +67,7 @@ class GitHubTargetRepo(SelfBootstrapTargetRepo):
         super().__init__(root=root, remote_url=ssh_url, default_branch=default_branch)
         # Override the class-level `name = "ai_team"` from the parent.
         self.name = f"{owner}/{repo}"
+        self._owner_repo = f"{owner}/{repo}"
 
     async def ensure_local_clone(self) -> Path:
         if (self.root / ".git").is_dir():
@@ -73,14 +76,19 @@ class GitHubTargetRepo(SelfBootstrapTargetRepo):
                 raise GitCommandError(f"git fetch failed: {err.strip()[:500]}")
             return self.root
         self.root.parent.mkdir(parents=True, exist_ok=True)
+        # `gh repo clone` respects the user's gh auth + configured protocol
+        # (https/ssh) — avoids requiring a separate SSH key when the owner
+        # is already gh-authenticated. Falls back to the same credential
+        # path as every other `gh` call in the codebase.
         rc, _out, err = await _run(
-            "git",
+            "gh",
+            "repo",
             "clone",
-            str(self.remote_url),
+            self._owner_repo,
             str(self.root),
             cwd=self.root.parent,
             timeout_s=300,
         )
         if rc != 0:
-            raise GitCommandError(f"git clone failed: {err.strip()[:500]}")
+            raise GitCommandError(f"gh repo clone failed: {err.strip()[:500]}")
         return self.root
