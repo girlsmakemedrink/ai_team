@@ -77,6 +77,150 @@ MARKET_SCAN_SCHEMA: dict[str, object] = {
 }
 
 
+BRAINSTORM_NICHE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "required": [
+        "niche",
+        "candidates",
+        "researcher_top_3_slugs",
+        "research_sources_used",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "niche": {
+            "type": "string",
+            "enum": ["dev_tools", "b2b_smb", "creator_tools"],
+        },
+        "candidates": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 5,
+            "items": {
+                "type": "object",
+                "required": [
+                    "title", "slug", "one_paragraph", "target_buyer",
+                    "monetization", "known_competitors", "scores",
+                    "composite_score", "rationale",
+                ],
+                "additionalProperties": False,
+                "properties": {
+                    "title":         {"type": "string", "minLength": 1, "maxLength": 120},
+                    "slug":          {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+                    "one_paragraph": {"type": "string", "minLength": 1, "maxLength": 1500},
+                    "target_buyer":  {"type": "string", "minLength": 1, "maxLength": 300},
+                    "monetization": {
+                        "type": "string",
+                        "enum": ["subscription", "per-seat", "usage", "one-time", "freemium"],
+                    },
+                    "known_competitors": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["name", "positioning"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "name":        {"type": "string"},
+                                "url":         {"type": "string"},
+                                "positioning": {"type": "string"},
+                            },
+                        },
+                    },
+                    "scores": {
+                        "type": "object",
+                        "required": [
+                            "tam_signal", "solo_fit", "llm_opex_fit",
+                            "defensibility", "time_to_first_revenue",
+                        ],
+                        "additionalProperties": False,
+                        "properties": {
+                            "tam_signal": {
+                                "type": "integer", "minimum": 1, "maximum": 5
+                            },
+                            "solo_fit": {
+                                "type": "integer", "minimum": 1, "maximum": 5
+                            },
+                            "llm_opex_fit": {
+                                "type": "integer", "minimum": 1, "maximum": 5
+                            },
+                            "defensibility": {
+                                "type": "integer", "minimum": 1, "maximum": 5
+                            },
+                            "time_to_first_revenue": {
+                                "type": "integer", "minimum": 1, "maximum": 5
+                            },
+                        },
+                    },
+                    "composite_score": {"type": "integer", "minimum": 5, "maximum": 25},
+                    "rationale":       {"type": "string", "minLength": 1, "maxLength": 1500},
+                },
+            },
+        },
+        "researcher_top_3_slugs": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+        },
+        "research_sources_used": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+}
+
+
+def _render_brainstorm_markdown(scan: dict[str, Any]) -> str:
+    """Render BRAINSTORM_NICHE_SCHEMA output to human-readable Markdown."""
+    lines: list[str] = [
+        f"# Brainstorm — {scan['niche']}",
+        "",
+        "- **Status**: Draft (Market Researcher; pending owner approval)",
+        f"- **Candidates**: {len(scan['candidates'])}",
+        "",
+        "## Researcher top-3",
+        "",
+    ]
+    by_slug = {c["slug"]: c for c in scan["candidates"]}
+    for slug in scan["researcher_top_3_slugs"]:
+        cand = by_slug.get(slug)
+        if cand is None:
+            lines.append(f"- [missing slug in candidates: `{slug}`]")
+        else:
+            score = cand["composite_score"]
+            lines.append(f"- **{cand['title']}** (`{slug}`) — composite {score}/25")
+    lines.append("")
+    lines.append("## All candidates")
+    lines.append("")
+    for cand in scan["candidates"]:
+        lines.append(f"### {cand['title']} (`{cand['slug']}`)")
+        lines.append("")
+        lines.append(cand["one_paragraph"].strip())
+        lines.append("")
+        lines.append(f"- **Target buyer**: {cand['target_buyer']}")
+        lines.append(f"- **Monetization**: {cand['monetization']}")
+        s = cand["scores"]
+        lines.append(
+            f"- **Scores**: TAM {s['tam_signal']} · solo {s['solo_fit']} · "
+            f"LLM-OPEX {s['llm_opex_fit']} · defensibility {s['defensibility']} · "
+            f"TTFR {s['time_to_first_revenue']} → composite {cand['composite_score']}/25"
+        )
+        lines.append("")
+        if cand["known_competitors"]:
+            lines.append("- **Known competitors**:")
+            for comp in cand["known_competitors"]:
+                url = f" ({comp.get('url')})" if comp.get("url") else ""
+                lines.append(f"  - {comp['name']}{url}: {comp['positioning']}")
+        lines.append("")
+        lines.append(f"_Rationale_: {cand['rationale'].strip()}")
+        lines.append("")
+    lines.append("## Sources consulted")
+    lines.append("")
+    for src in scan["research_sources_used"]:
+        lines.append(f"- {src}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _render_scan_markdown(scan: dict[str, Any]) -> str:
     lines: list[str] = [
         f"# Market scan — {scan['title']}",

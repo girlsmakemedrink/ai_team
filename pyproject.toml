@@ -142,4 +142,5 @@ skips = ["B101"]  # allow assert
 [dependency-groups]
 dev = [
     "aiosqlite>=0.22.1",
+    "jsonschema>=4.26.0",
 ]
