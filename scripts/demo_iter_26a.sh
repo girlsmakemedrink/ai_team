@@ -100,12 +100,17 @@ RESP=$(curl -sf -X POST http://127.0.0.1:8000/api/tasks \
 CORRELATION=$(echo "$RESP" | python3 -c 'import sys, json; print(json.load(sys.stdin)["correlation_id"])')
 ok "submitted (correlation $CORRELATION)"
 
-step "6/7 — Poll for QA pending_review (≤15 min)"
+step "6/7 — Poll for QA pending_review (≤40 min)"
 # QA's safety net always writes a pending_reviews row with
 # requesting_agent='qa_engineer' once the brainstorm chain completes.
 # We poll /api/reviews for a qa_engineer-authored row rather than
 # hitting psql directly, matching the iter-25 polling pattern.
-deadline=$((SECONDS + 900))
+#
+# 40 min budget: dispatcher currently serializes per-role (one consumer
+# per AgentId — see core/dispatcher/dispatcher.py:96). The 3 MR runs
+# execute sequentially, so worst case is 3 × MR_timeout (600s) + QA
+# (~60s) = ~31 min. Add slack for WebFetch retries.
+deadline=$((SECONDS + 2400))
 qa_review_count=0
 loop_minute=0
 while (( SECONDS < deadline )); do

@@ -281,7 +281,12 @@ class MarketResearcherAgent(BaseAgent):
     mcp_env: ClassVar[dict[str, str]] = {
         "AI_TEAM_PATH_PREFIXES": "docs/sandbox/ideas,docs/market,docs/products/_candidates",
     }
-    llm_timeout_s: ClassVar[int] = 300
+    # iter-26a: bumped 300 → 600 after demo R#1 showed brainstorm-niche
+    # mode (WebFetch + 5 candidates + 5-axis scoring + schema validation)
+    # consistently times out at 300s under real `claude -p`. Same pattern
+    # as iter-7 (Architect 300 → 600) and iter-8 (Designer 300 → 600).
+    # 600s is BaseAgent default; MR was lagging.
+    llm_timeout_s: ClassVar[int] = 600
     max_turns: ClassVar[int] = 15
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
