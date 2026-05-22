@@ -275,7 +275,15 @@ class QAEngineerAgent(BaseAgent):
             return
 
         report = response.structured or {}
-        summary = str(report.get("summary") or "QA verdict (Python safety net)").strip()
+        # `summary` is the QA_REPORT_SCHEMA field; `ranking_summary` is the
+        # RANK_BRAINSTORM_SCHEMA field. Try both before falling back to the
+        # generic placeholder so the owner sees meaningful text in
+        # `ai-team list-pending` for either intent.
+        summary = str(
+            report.get("summary")
+            or report.get("ranking_summary")
+            or "QA verdict (Python safety net)"
+        ).strip()
         if not summary:
             summary = "QA verdict (Python safety net)"
 
