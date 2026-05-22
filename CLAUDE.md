@@ -195,6 +195,23 @@ make smoke-llm        # validate `claude -p` substrate against ADR-008
 make demo             # iter-1 demo end-to-end
 ```
 
+### iter-26 product CLI
+
+```
+ai-team brainstorm-products --niches X,Y,Z --constraints-json scripts/iter_26a_constraints.json
+   # iter-26a: MR brainstorms 5 candidates per niche × 3 niches → 15 total,
+   # QA ranks, owner picks top-3 in approval comment. ~$1-3 + ~15-25 min.
+
+ai-team validate-product --slug <slug> --candidate-file <md> --depth standard
+   # iter-26b: 4-agent diligence on one slug (MR competitors + Architect
+   # tech-risk + PM revenue + QA go/no-go). Owner approves with
+   # `decision: go|pivot|kill — <rationale>`. ~$8-14 + ~15-25 min at
+   # depth=standard. Default constraints file: scripts/iter_26b_constraints.json.
+
+scripts/demo_iter_26a.sh                       # owner-manual brainstorm demo
+scripts/demo_iter_26b.sh [slug] [depth]        # owner-manual validate demo
+```
+
 ## Key ADRs (`docs/adr/`)
 
 | #   | What it says                                                                       |
@@ -237,6 +254,15 @@ docs/products/_candidates/  # iter-26a+: brainstormed product candidates
                             # pool). _combined_ranking.md is QA's
                             # merged shortlist; owner picks top-3 in
                             # the pending_review approval comment.
+docs/products/<slug>/       # iter-26b+: per-candidate diligence outputs
+                            # from the 4-agent validate-product chain.
+                            # competitors.md (MR), tech_risk.md
+                            # (Architect), revenue.md (PM),
+                            # _validation_summary.md (QA + owner-facing
+                            # YAML block with recommendation
+                            # go|go_with_caveats|pivot|kill).
+                            # Per-candidate dir is the staging ground
+                            # between brainstorm and iter-27 build.
 infra/docker-compose.yml
 scripts/demo_iter_1.sh
 ```
