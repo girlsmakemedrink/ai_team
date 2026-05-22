@@ -34,6 +34,7 @@ from core.messaging.schemas import (
     MessageType,
     Priority,
     TaskAssignmentPayload,
+    TaskReportPayload,
     TaskStatus,
 )
 
@@ -90,6 +91,7 @@ async def test_mr_brainstorm_dev_tools_real_llm(
 
     assert outputs, "MR returned no outputs"
     report = outputs[0].payload
+    assert isinstance(report, TaskReportPayload)
     assert report.status == TaskStatus.DONE, f"expected DONE, got {report.status}: {report.summary}"
     assert any("_brainstorm_dev_tools.md" in a for a in report.artifacts), (
         f"missing brainstorm artifact path; got {report.artifacts}"

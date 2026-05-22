@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-import jsonschema
+from typing import Any
+
+import jsonschema  # type: ignore[import-untyped]
 import pytest
 
 from agents.market_researcher.agent import (
@@ -11,7 +13,7 @@ from agents.market_researcher.agent import (
 )
 
 
-def _valid_brainstorm() -> dict[str, object]:
+def _valid_brainstorm() -> dict[str, Any]:
     candidate = {
         "title": "AI commit-message generator",
         "slug": "ai-commit-message-generator",

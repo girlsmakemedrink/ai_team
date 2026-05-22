@@ -19,6 +19,7 @@ from core.messaging.schemas import (
     MessageType,
     Priority,
     TaskAssignmentPayload,
+    TaskReportPayload,
     TaskStatus,
 )
 
@@ -109,6 +110,7 @@ async def test_brainstorm_mode_writes_to_products_candidates(
 
     assert len(outputs) == 1
     report = outputs[0].payload
+    assert isinstance(report, TaskReportPayload)
     assert report.status == TaskStatus.DONE
     assert any("_brainstorm_dev_tools.md" in a for a in report.artifacts)
 
@@ -135,11 +137,10 @@ async def test_brainstorm_mode_invalid_top_3_fails_cleanly(
 
     outputs = await agent.handle(_assignment("dev_tools"))
 
-    assert outputs[0].payload.status == TaskStatus.FAILED
-    assert (
-        "top_3" in outputs[0].payload.summary.lower()
-        or "slug" in outputs[0].payload.summary.lower()
-    )
+    payload = outputs[0].payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status == TaskStatus.FAILED
+    assert "top_3" in payload.summary.lower() or "slug" in payload.summary.lower()
 
 
 @pytest.mark.asyncio
@@ -160,8 +161,10 @@ async def test_brainstorm_composite_score_mismatch_fails_cleanly(
 
     outputs = await agent.handle(_assignment("dev_tools"))
 
-    assert outputs[0].payload.status == TaskStatus.FAILED
-    assert "composite" in outputs[0].payload.summary.lower()
+    payload = outputs[0].payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status == TaskStatus.FAILED
+    assert "composite" in payload.summary.lower()
 
 
 @pytest.mark.asyncio
@@ -205,5 +208,7 @@ async def test_single_scan_mode_still_works(
 
     outputs = await agent.handle(msg)
 
-    assert outputs[0].payload.status == TaskStatus.DONE
+    payload = outputs[0].payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status == TaskStatus.DONE
     assert (tmp_path / "docs" / "sandbox" / "ideas" / "single-scan-probe.md").exists()

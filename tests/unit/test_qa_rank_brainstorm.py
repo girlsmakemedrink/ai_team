@@ -19,6 +19,7 @@ from core.messaging.schemas import (
     MessageType,
     Priority,
     TaskAssignmentPayload,
+    TaskReportPayload,
     TaskStatus,
 )
 
@@ -103,7 +104,9 @@ async def test_qa_rank_brainstorm_writes_combined_ranking_with_explicit_artifact
 
     outputs = await agent.handle(msg)
 
-    assert outputs[0].payload.status == TaskStatus.DONE
+    payload = outputs[0].payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status == TaskStatus.DONE
     ranking = cands_dir / "_combined_ranking.md"
     assert ranking.exists(), "_combined_ranking.md must be written"
     text = ranking.read_text()
@@ -152,7 +155,9 @@ async def test_qa_rank_brainstorm_fallback_glob_when_artifacts_missing(
     )
 
     outputs = await agent.handle(msg)
-    assert outputs[0].payload.status == TaskStatus.DONE
+    payload = outputs[0].payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status == TaskStatus.DONE
     ranking = cands_dir / "_combined_ranking.md"
     assert ranking.exists()
     text = ranking.read_text()
@@ -185,4 +190,6 @@ async def test_qa_existing_intent_still_works() -> None:
         ),
     )
     outputs = await agent.handle(msg)
-    assert outputs[0].payload.status == TaskStatus.DONE
+    payload = outputs[0].payload
+    assert isinstance(payload, TaskReportPayload)
+    assert payload.status == TaskStatus.DONE

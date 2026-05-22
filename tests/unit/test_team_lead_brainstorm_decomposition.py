@@ -380,6 +380,7 @@ def test_tl_mr_subtasks_propagate_structured_inputs() -> None:
 
     niche_to_assignment = {}
     for a in mr_assignments:
+        assert isinstance(a.payload, TaskAssignmentPayload)
         niche = a.payload.inputs.get("niche")
         assert niche is not None, (
             f"MR subtask {a.metadata.get('subtask_id')!r} missing inputs.niche"
@@ -388,7 +389,9 @@ def test_tl_mr_subtasks_propagate_structured_inputs() -> None:
 
     for niche in ("dev_tools", "b2b_smb", "creator_tools"):
         assert niche in niche_to_assignment, f"No MR subtask found for niche {niche!r}"
-        inputs = niche_to_assignment[niche].payload.inputs
+        niche_payload = niche_to_assignment[niche].payload
+        assert isinstance(niche_payload, TaskAssignmentPayload)
+        inputs = niche_payload.inputs
         assert inputs.get("mode") == "brainstorm_niche", (
             f"MR subtask for {niche!r} missing inputs.mode='brainstorm_niche'; got {inputs!r}"
         )
@@ -420,7 +423,9 @@ def test_tl_qa_subtask_propagates_structured_inputs() -> None:
         and isinstance(o.payload, TaskAssignmentPayload)
     ]
     assert len(qa_assignments) == 1
-    qa_inputs = qa_assignments[0].payload.inputs
+    qa_payload = qa_assignments[0].payload
+    assert isinstance(qa_payload, TaskAssignmentPayload)
+    qa_inputs = qa_payload.inputs
     assert qa_inputs == {"intent": "rank_brainstorm_candidates"}, (
         "QA subtask payload.inputs mismatch: expected rank_brainstorm_candidates, "
         f"got {qa_inputs!r}"
@@ -433,7 +438,7 @@ def test_tl_subtasks_without_inputs_field_default_to_empty_dict() -> None:
     Pre-iter-26a decompositions never included an 'inputs' key. The schema
     change must be backward-compatible — existing TL outputs must still work.
     """
-    plan = {
+    plan: dict[str, object] = {
         "summary": "Legacy decomposition without inputs field.",
         "subtasks": [
             {
