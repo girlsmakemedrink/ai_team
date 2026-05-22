@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """iter-26b real-LLM smoke for MR validate_competitors mode at depth=quick.
 
 Cost target: ~$0.50-1.50. Run on demand:
@@ -45,8 +46,7 @@ CANDIDATE_BRIEF = """## 1. AI Content Engine for Telegram Developer Channels
 
 **Slug:** telegram-tech-publisher
 **Monetization:** subscription
-**Target Buyer:** Developer-influencers running Telegram channels (500–100k subscribers) in Russian-speaking and global developer communities who want to post consistently without writing each post manually.
-
+**Target Buyer:** Developer-influencers running Telegram channels (500-100k subscribers) in Russian-speaking and global developer communities who want to post consistently without writing each post manually.
 **One Paragraph:** Telegram is the dominant technical content platform in the CIS developer community. This tool monitors the creator's specified sources (GitHub, RSS, Hacker News) and drafts 3-5 Telegram-formatted posts per day in the creator's established voice, including code blocks, inline links, and optional Telegra.ph long-reads for deep dives.
 
 **Scores:** tam_signal=3, solo_fit=5, llm_opex_fit=5, defensibility=4, time_to_first_revenue=5
