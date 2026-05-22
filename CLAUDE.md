@@ -33,6 +33,17 @@ existing `gh` auth substrate (no separate SSH key required). Agent
 invocations against the new repo queue for iter-29. See
 `docs/iterations/iter_28_retro.md` + `iter_28_handoff.md`.
 
+**iter-29c (2026-05-22, cross-repo plumbing shipped):** dispatcher
+resolves `payload.target_repo`, ensures workspace clone, and stashes the
+path on `msg.metadata["target_repo_workspace"]`. `BaseAgent._build_env`
+injects `AI_TEAM_REPO_ROOT=<workspace>`; `_invoke_with_retries` forwards
+`cwd=<workspace>` to `LLMClient.invoke`. `TeamLeadAgent` caps its
+re-decompose chain at `MAX_REDECOMPOSE_DEPTH = 2` per `correlation_id`
+to prevent Backend-tripwire-driven runaways. End state: ready for
+iter-29b to dispatch the agent chain (TL → Architect → Backend → QA)
+against `girlsmakemedrink/telegram-tech-publisher` end-to-end. See
+`docs/iterations/iter_29c_retro.md` + `iter_29c_handoff.md`.
+
 Owner: solo dev (@girlsmakemedrink). No other humans in the loop.
 
 ## Hard constraint — LLM access
@@ -315,5 +326,12 @@ the product repo holds PRD + ADRs + code.
   obvious — local-`main` divergence is harder to undo than to prevent,
   and the auto-classifier (correctly) blocks `git reset --hard` as a
   recovery shortcut. Lesson from iter-27 Phase A.
+- **Cross-repo tasks run with `cwd = workspace`.** When a
+  `TaskAssignment` carries `payload.target_repo="<owner>/<repo>"`, the
+  dispatcher resolves to `~/.ai_team/workspaces/<owner>--<repo>/` and
+  the agent's `claude -p` subprocess runs in that cwd with
+  `AI_TEAM_REPO_ROOT` populated. Self-hosting tasks (no `target_repo`)
+  keep their current behavior — `cwd` inherits the dispatcher's cwd.
+  Added in iter-29c PR 1 (`8015123`).
 - **Commit small, conventional, push frequently.** Squash-merge collapses
   on merge.
