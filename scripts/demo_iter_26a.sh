@@ -141,26 +141,27 @@ if [[ "${qa_review_count:-0}" -lt 1 ]]; then
     exit 1
 fi
 
-step "6.5/7 — Auto-approve pending_reviews (close the loop)"
-# Use python3 - "$JSON" <<'PY' pattern (iter-21 fix: avoids pipe-into-heredoc
-# conflict where python's stdin is captured by the heredoc, not the JSON pipe).
+step "6.5/7 — List pending_reviews (DO NOT auto-approve)"
+# iter-26a contract: owner reviews the brainstorm output and picks the
+# top-3 candidate slugs in the approval comment. iter-26b parses that
+# comment to seed its idea-validator runs. An auto-approve with a
+# generic message would defeat the purpose of the iteration. The list
+# below is informational only — Task 13 (owner-manual) closes the loop.
 REVIEWS_JSON=$(curl -sf -H "Authorization: Bearer $OWNER_TOKEN" \
     http://127.0.0.1:8000/api/reviews 2>/dev/null || true)
 REVIEWS_JSON="${REVIEWS_JSON:-[]}"
 python3 - "$REVIEWS_JSON" <<'PY' || true
-import json, subprocess, sys
+import json, sys
 data = json.loads(sys.argv[1])
 if not data:
-    print("(no pending_reviews — chain didn't reach QA)")
+    print("(no pending_reviews — chain did not reach QA)")
 else:
     for r in data:
         rid = r["id"]
-        print(f"approving {rid} ({r.get('requesting_agent','?')}: {r.get('summary','')[:80]})")
-        subprocess.run(
-            ["uv", "run", "ai-team", "approve", rid,
-             "--comment", "iter-26a demo auto-approve"],
-            check=False,
-        )
+        print(f"pending: {rid} ({r.get('requesting_agent','?')}: {r.get('summary','')[:120]})")
+    print()
+    print("Owner: review _combined_ranking.md, then approve with top-3 slugs, e.g.")
+    print("   uv run ai-team approve <id> --comment \"top-3: <slug-1>, <slug-2>, <slug-3>\"")
 PY
 
 step "7/7 — Collect demo report"
