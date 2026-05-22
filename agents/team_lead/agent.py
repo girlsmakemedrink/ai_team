@@ -377,6 +377,13 @@ class TeamLeadAgent(BaseAgent):
             "depends_on slugs where needed. Backend's original BLOCKED "
             f"report follows:\n\n{summary}"
         )[:10_000]
+        # iter-29a fix: reuse the BLOCKED Backend task_id as the
+        # re-decompose anchor. The downstream children TL emits will
+        # carry this as their parent_task_id; that row is already in
+        # the `tasks` table (Backend was running it), so the FK
+        # constraint on inserts holds. Using `uuid4()` here created an
+        # orphan parent → ForeignKeyViolationError that crashed the
+        # dispatcher worker on every Backend tripwire.
         return [
             AgentMessage(
                 correlation_id=msg.correlation_id,
@@ -385,7 +392,7 @@ class TeamLeadAgent(BaseAgent):
                 message_type=MessageType.TASK_ASSIGNMENT,
                 priority=msg.priority,
                 payload=TaskAssignmentPayload(
-                    task_id=uuid4(),
+                    task_id=msg.payload.task_id,
                     title=f"Re-decompose: {summary[:80]}",
                     description=description,
                 ),

@@ -213,6 +213,13 @@ async def test_re_decomposes_on_blocked_task_too_large() -> None:
     assert "re-decompose" in out.payload.description.lower()
     assert "idea-validator pipeline" in out.payload.description
     assert out.correlation_id == msg.correlation_id
+    # iter-29a regression guard: the self-task_assignment must reuse the
+    # BLOCKED Backend task_id, not generate a fresh uuid4(). A fresh ID
+    # would be an orphan (the dispatcher skips persisting self-assigns)
+    # and any decomp child inserted under it would fail the
+    # tasks_parent_task_id_fkey constraint.
+    assert isinstance(msg.payload, TaskReportPayload)
+    assert out.payload.task_id == msg.payload.task_id
 
 
 @pytest.mark.asyncio
