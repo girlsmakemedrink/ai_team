@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "name": "Mock Co 0",
+      "url": "https://mock0.example.com",
+      "positioning": "snippet"
+    },
+    {
+      "name": "Mock Co 1",
+      "url": "https://mock1.example.com",
+      "positioning": "snippet"
+    },
+    {
+      "name": "Mock Co 2",
+      "url": "https://mock2.example.com",
+      "positioning": "snippet"
+    }
+  ]
+}
