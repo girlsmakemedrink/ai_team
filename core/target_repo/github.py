@@ -94,29 +94,35 @@ class GitHubTargetRepo(SelfBootstrapTargetRepo):
         return self.root
 
     async def prepare_for_task(self) -> None:
-        """Reset workspace to a clean main before each task.
+        """Reset workspace to a clean default branch before each task.
 
-        Steps: fetch origin/main → dirty-check → checkout main →
-        ff-only merge origin/main. Loud-fail on dirty workspace or
-        diverged local main; no destructive reset. Owner intervenes.
+        Steps: fetch origin/<default_branch> → dirty-check → checkout
+        <default_branch> → ff-only merge origin/<default_branch>.
+        Loud-fail on dirty workspace or diverged local branch; no
+        destructive reset. Owner intervenes.
         """
-        rc, _out, err = await _run("git", "fetch", "origin", "main", cwd=self.root)
+        rc, _out, err = await _run("git", "fetch", "origin", self.default_branch, cwd=self.root)
         if rc != 0:
-            raise GitCommandError(f"failed to fetch origin/main: {err.strip()[:500]}")
+            raise GitCommandError(
+                f"failed to fetch origin/{self.default_branch}: {err.strip()[:500]}"
+            )
         rc, out, err = await _run("git", "status", "--porcelain", cwd=self.root)
         if rc != 0:
             raise GitCommandError(f"git status failed: {err.strip()[:500]}")
         if out.strip():
             raise GitCommandError(
                 f"workspace has uncommitted changes: {out.strip()[:500]}; "
-                f"refusing to checkout main"
+                f"refusing to checkout {self.default_branch}"
             )
-        rc, _out, err = await _run("git", "checkout", "main", cwd=self.root)
+        rc, _out, err = await _run("git", "checkout", self.default_branch, cwd=self.root)
         if rc != 0:
-            raise GitCommandError(f"git checkout main failed: {err.strip()[:500]}")
-        rc, _out, err = await _run("git", "merge", "--ff-only", "origin/main", cwd=self.root)
+            raise GitCommandError(f"git checkout {self.default_branch} failed: {err.strip()[:500]}")
+        rc, _out, err = await _run(
+            "git", "merge", "--ff-only", f"origin/{self.default_branch}", cwd=self.root
+        )
         if rc != 0:
             raise GitCommandError(
-                f"local main diverged from origin/main: {err.strip()[:500]}; "
-                f"manual intervention required"
+                f"local {self.default_branch} diverged from"
+                f" origin/{self.default_branch}: {err.strip()[:500]};"
+                f" manual intervention required"
             )
