@@ -5,8 +5,10 @@ from core.target_repo.base import (
     TargetRepo,
     TestRunResult,
 )
+from core.target_repo.github import GitHubTargetRepo
 
 __all__ = [
+    "GitHubTargetRepo",
     "LintRunResult",
     "PullRequest",
     "RepoStatus",
