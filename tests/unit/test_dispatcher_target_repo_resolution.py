@@ -68,7 +68,6 @@ def _report() -> AgentMessage:
     )
 
 
-@pytest.mark.asyncio
 async def test_resolves_and_stashes_workspace_for_assignment_with_target_repo(
     tmp_path: Path,
 ) -> None:
@@ -91,7 +90,6 @@ async def test_resolves_and_stashes_workspace_for_assignment_with_target_repo(
     assert msg.metadata.get("target_repo_workspace") == str(workspace)
 
 
-@pytest.mark.asyncio
 async def test_skips_resolution_when_payload_target_repo_is_none(tmp_path: Path) -> None:
     dispatcher = _make_dispatcher(tmp_path)
     msg = _assignment(target_repo=None)
@@ -105,7 +103,6 @@ async def test_skips_resolution_when_payload_target_repo_is_none(tmp_path: Path)
     assert "target_repo_workspace" not in msg.metadata
 
 
-@pytest.mark.asyncio
 async def test_skips_resolution_for_non_assignment_messages(tmp_path: Path) -> None:
     dispatcher = _make_dispatcher(tmp_path)
     msg = _report()
@@ -119,7 +116,6 @@ async def test_skips_resolution_for_non_assignment_messages(tmp_path: Path) -> N
     assert "target_repo_workspace" not in msg.metadata
 
 
-@pytest.mark.asyncio
 async def test_resolution_failure_propagates_for_synthesise_catch(tmp_path: Path) -> None:
     """Bad identifier raises; the dispatcher's outer try/except in
     _handle_one will catch and route via _synthesise_failed_report.
@@ -134,7 +130,6 @@ async def test_resolution_failure_propagates_for_synthesise_catch(tmp_path: Path
         await dispatcher._maybe_resolve_target_repo_workspace(msg)
 
 
-@pytest.mark.asyncio
 async def test_clone_failure_propagates_for_synthesise_catch(tmp_path: Path) -> None:
     fake_repo = AsyncMock()
     fake_repo.ensure_local_clone = AsyncMock(side_effect=RuntimeError("git clone failed"))
