@@ -139,9 +139,11 @@ class TeamLeadAgent(BaseAgent):
         super().__init__(llm=llm)
         # iter-29c: per-correlation re-decompose counter. Bumped each
         # time `_re_decompose_on_too_large` emits a TL→TL self-assignment;
-        # cleared on cap-exceeded FAILED emit. Bounded by the number of
-        # live correlations in flight (small in practice — one entry per
-        # in-flight tripwire chain).
+        # cleared on cap-exceeded FAILED emit. Successful chains
+        # (Backend → DONE) leave their entry in the dict until process
+        # restart — bounded by lifetime correlation count, not live
+        # cardinality. Acceptable today (one entry per chain that ever
+        # tripped the wire); revisit if memory profile shows growth.
         self._redecompose_depth: dict[UUID, int] = {}
 
     def build_outputs(self, response: LLMResponse, incoming: AgentMessage) -> list[AgentMessage]:
@@ -391,6 +393,10 @@ class TeamLeadAgent(BaseAgent):
                 depth=depth,
                 cap=MAX_REDECOMPOSE_DEPTH,
             )
+            # Intentional reset: a future BLOCKED on this same
+            # correlation (e.g., owner-initiated retry after the FAILED
+            # report) starts a fresh depth=0 chain. The FAILED report
+            # is the user-visible signal; counter persistence is not.
             self._redecompose_depth.pop(msg.correlation_id, None)
             cap_summary = (
                 f"re-decompose depth cap ({MAX_REDECOMPOSE_DEPTH}) exceeded. "
