@@ -277,9 +277,9 @@ class MarketResearcherAgent(BaseAgent):
         "mcp__ai_team_tasks__request_human_review",
     )
     system_prompt_path: ClassVar[Path] = _REPO_ROOT / "prompts" / "market_researcher.md"
-    # Per ADR-004: writes only to ideas/, market/, and products/.
+    # Per ADR-004: writes only to ideas/, market/, and products/_candidates/.
     mcp_env: ClassVar[dict[str, str]] = {
-        "AI_TEAM_PATH_PREFIXES": "docs/sandbox/ideas,docs/market,docs/products",
+        "AI_TEAM_PATH_PREFIXES": "docs/sandbox/ideas,docs/market,docs/products/_candidates",
     }
     llm_timeout_s: ClassVar[int] = 300
     max_turns: ClassVar[int] = 15
