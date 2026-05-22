@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from agents.market_researcher.agent import MarketResearcherAgent
 from core.llm.base import LLMResponse, TokensUsage
