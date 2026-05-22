@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from core.llm.claude_code_headless import ClaudeCodeHeadlessClient
 
 
@@ -16,7 +14,6 @@ def _fake_proc(stdout: bytes = b'{"result":"hi","session_id":"s","usage":{}}') -
     return proc
 
 
-@pytest.mark.asyncio
 async def test_invoke_forwards_cwd_to_subprocess() -> None:
     client = ClaudeCodeHeadlessClient(binary="claude")
     with patch(
@@ -27,7 +24,6 @@ async def test_invoke_forwards_cwd_to_subprocess() -> None:
     assert mock_spawn.await_args.kwargs.get("cwd") == "/tmp/ws-X"
 
 
-@pytest.mark.asyncio
 async def test_invoke_default_cwd_is_none() -> None:
     """Self-hosting regression guard: omitted cwd → subprocess inherits parent cwd."""
     client = ClaudeCodeHeadlessClient(binary="claude")
