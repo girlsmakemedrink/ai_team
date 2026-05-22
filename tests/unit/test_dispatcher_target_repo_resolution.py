@@ -123,10 +123,13 @@ async def test_resolution_failure_propagates_for_synthesise_catch(tmp_path: Path
     dispatcher = _make_dispatcher(tmp_path)
     msg = _assignment(target_repo="bad-shape")
 
-    with patch(
-        "core.dispatcher.dispatcher.resolve_target_repo",
-        side_effect=ValueError("unknown target_repo"),
-    ), pytest.raises(ValueError, match="unknown target_repo"):
+    with (
+        patch(
+            "core.dispatcher.dispatcher.resolve_target_repo",
+            side_effect=ValueError("unknown target_repo"),
+        ),
+        pytest.raises(ValueError, match="unknown target_repo"),
+    ):
         await dispatcher._maybe_resolve_target_repo_workspace(msg)
 
 
@@ -137,8 +140,11 @@ async def test_clone_failure_propagates_for_synthesise_catch(tmp_path: Path) -> 
     dispatcher = _make_dispatcher(tmp_path)
     msg = _assignment(target_repo="owner/repo")
 
-    with patch(
-        "core.dispatcher.dispatcher.resolve_target_repo",
-        return_value=fake_repo,
-    ), pytest.raises(RuntimeError, match="git clone failed"):
+    with (
+        patch(
+            "core.dispatcher.dispatcher.resolve_target_repo",
+            return_value=fake_repo,
+        ),
+        pytest.raises(RuntimeError, match="git clone failed"),
+    ):
         await dispatcher._maybe_resolve_target_repo_workspace(msg)

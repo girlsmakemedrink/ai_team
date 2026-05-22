@@ -82,9 +82,7 @@ async def test_cross_repo_dispatch_threads_workspace_to_llm(tmp_path: Path) -> N
     # Pre-clone into tmp_path/workspaces/ to avoid touching ~/.ai_team/.
     workspaces = tmp_path / "workspaces"
     workspaces.mkdir()
-    repo = GitHubTargetRepo(
-        "girlsmakemedrink/telegram-tech-publisher", workspaces_dir=workspaces
-    )
+    repo = GitHubTargetRepo("girlsmakemedrink/telegram-tech-publisher", workspaces_dir=workspaces)
     workspace = await repo.ensure_local_clone()
     assert (workspace / ".git").is_dir()
 
@@ -122,9 +120,7 @@ async def test_cross_repo_dispatch_threads_workspace_to_llm(tmp_path: Path) -> N
     ):
         await dispatcher._maybe_resolve_target_repo_workspace(msg)
         assert msg.metadata.get("target_repo_workspace") == str(workspace)
-        await agent._invoke_with_retries(
-            msg=msg, system_prompt="sp", user_message="um"
-        )
+        await agent._invoke_with_retries(msg=msg, system_prompt="sp", user_message="um")
 
     assert len(llm.calls) == 1
     call = llm.calls[0]
