@@ -81,9 +81,9 @@ async def test_depth_at_cap_emits_failed_report() -> None:
     outputs = await agent.handle(_blocked_too_large(correlation_id=cid))
 
     assert len(outputs) == 1
-    out = outputs[0]
-    assert out.message_type == MessageType.TASK_REPORT
-    payload = out.payload
+    cap_msg = outputs[0]
+    assert cap_msg.message_type == MessageType.TASK_REPORT
+    payload = cap_msg.payload
     assert isinstance(payload, TaskReportPayload)
     assert payload.status == TaskStatus.FAILED
     assert "re-decompose" in payload.summary.lower()
