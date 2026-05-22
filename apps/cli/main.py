@@ -492,7 +492,7 @@ def validate_product(
     payload = {
         "title": f"Validate product: {slug}",
         "description": candidate_brief,
-        "priority": "p2",
+        "priority": "P2",
         "inputs": {
             "intent": "validate_product",
             "slug": slug,
