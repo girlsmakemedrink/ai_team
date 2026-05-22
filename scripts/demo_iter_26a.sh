@@ -68,17 +68,19 @@ trap _cleanup_iter26a EXIT
 until curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1; do sleep 1; done
 ok "API ready (pid $API_PID)"
 
-if [[ "${AI_TEAM_DEMO_NON_INTERACTIVE:-0}" != "1" ]]; then
+if [[ "${AI_TEAM_DEMO_NON_INTERACTIVE:-0}" != "1" ]] && [[ -t 0 ]]; then
     cat <<NOTE
 
   In another terminal, watch the feed:
     uv run ai-team watch
 
   Press ENTER to submit the brainstorm task. (Set
-  AI_TEAM_DEMO_NON_INTERACTIVE=1 to skip this prompt for autonomous runs.)
+  AI_TEAM_DEMO_NON_INTERACTIVE=1 or close stdin to skip this prompt.)
 
 NOTE
-    read -r
+    # `|| true` so EOF on stdin doesn't trip `set -e` (autonomous-loop runs
+    # without a tty pipe stdin from /dev/null; that yields exit 1 from read).
+    read -r || true
 fi
 
 step "5/7 — Submit brainstorm-products task"
