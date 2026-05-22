@@ -81,6 +81,7 @@ async def test_ensure_local_clone_clones_when_missing(tmp_path: Path) -> None:
     """First call clones; workspace dir gets created."""
     repo = GitHubTargetRepo("girlsmakemedrink/telegram-tech-publisher", workspaces_dir=tmp_path)
     with patch("core.target_repo.github._run", new_callable=AsyncMock) as mock_run:
+
         def fake_clone(*args: object, **kwargs: object) -> tuple[int, str, str]:
             repo.root.mkdir(parents=True, exist_ok=True)
             (repo.root / ".git").mkdir()

@@ -17,12 +17,8 @@ from core.target_repo.self_bootstrap import (
 # `owner/repo` (no slashes inside parts), or https?://github.com/owner/repo[.git],
 # or git@github.com:owner/repo[.git]
 _OWNER_REPO_RE = re.compile(r"^([a-zA-Z0-9._-]+)/([a-zA-Z0-9._-]+?)(?:\.git)?$")
-_HTTPS_RE = re.compile(
-    r"^https?://github\.com/([a-zA-Z0-9._-]+)/([a-zA-Z0-9._-]+?)(?:\.git)?/?$"
-)
-_SSH_RE = re.compile(
-    r"^git@github\.com:([a-zA-Z0-9._-]+)/([a-zA-Z0-9._-]+?)(?:\.git)?$"
-)
+_HTTPS_RE = re.compile(r"^https?://github\.com/([a-zA-Z0-9._-]+)/([a-zA-Z0-9._-]+?)(?:\.git)?/?$")
+_SSH_RE = re.compile(r"^git@github\.com:([a-zA-Z0-9._-]+)/([a-zA-Z0-9._-]+?)(?:\.git)?$")
 
 
 def parse_github_identifier(identifier: str) -> tuple[str, str, str]:
