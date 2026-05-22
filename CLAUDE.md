@@ -16,6 +16,14 @@ served its purpose. **iter-26 opens with a strategic decision:**
 product ⭐ recommended, or (c) stabilization phase to close ≥5
 carry-overs. See `docs/iterations/iter_26_handoff.md`.
 
+**iter-27 (2026-05-22, bootstrap done):** first commercial product
+`telegram-tech-publisher` lives in its own repo at
+`git@github.com:girlsmakemedrink/telegram-tech-publisher.git`. ai_team is on
+the bench for iter-27 (no `GitHubTargetRepo` integration yet — deferred to
+iter-28). iter-27 deliverables: PRD + 6 ADRs + crisis playbook + smoke
+pipelines (GitHub poll + Telegram publish). See
+`docs/iterations/iter_27_retro.md` + `iter_27_handoff.md`.
+
 Owner: solo dev (@girlsmakemedrink). No other humans in the loop.
 
 ## Hard constraint — LLM access
@@ -266,6 +274,12 @@ docs/products/<slug>/       # iter-26b+: per-candidate diligence outputs
 infra/docker-compose.yml
 scripts/demo_iter_1.sh
 ```
+
+**External product repos** (iter-27+): the actual product code lives
+outside `ai_team`. Per-product GitHub repos under `girlsmakemedrink/<slug>`.
+iter-27 = `git@github.com:girlsmakemedrink/telegram-tech-publisher.git`.
+ai_team holds the iter spec (`docs/iterations/iter_27.md`) + retro + handoff;
+the product repo holds PRD + ADRs + code.
 
 ## Operating principles for this Claude
 
