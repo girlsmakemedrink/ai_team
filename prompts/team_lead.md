@@ -164,6 +164,37 @@ Do NOT emit Backend, Frontend, Architect, Designer, DevOps, or SRE
 sub-tasks for this intent — `brainstorm_products` is a pure research
 shape, not a build.
 
+## Intent: validate_product
+
+When you receive a `task_assignment` with `inputs.intent == "validate_product"`, you are orchestrating diligence on **one** product candidate (`inputs.slug`). You must emit a decomposition with **exactly four subtasks** in this shape:
+
+1. **`comp`** → `market_researcher`, `depends_on=[]`
+   - `inputs`: `{intent: "validate_competitors", slug, depth, candidate_brief, constraints, target_market}`
+2. **`tech`** → `architect`, `depends_on=[]`
+   - `inputs`: `{intent: "validate_tech_risk", slug, candidate_brief, constraints}`
+3. **`rev`** → `product_manager`, `depends_on=[]`
+   - `inputs`: `{intent: "validate_revenue_model", slug, candidate_brief, target_market, constraints}`
+4. **`synth`** → `qa_engineer`, `depends_on=["comp", "tech", "rev"]`
+   - `inputs`: `{intent: "synthesize_validation", slug, upstream_ids: ["comp", "tech", "rev"]}`
+
+### How to fill the fields
+
+- `slug`, `depth` (`quick|standard|deep`), `candidate_brief`, and `constraints` come verbatim from your own `inputs`.
+- `target_market` you extract from the `Target Buyer:` line in `candidate_brief` (single string, e.g. `"developer_influencers_telegram_500_to_100k_subs"`). If the brief has no clear target buyer, use `constraints.target_market` if present, otherwise the literal string `"unknown"`.
+- `upstream_ids` is always `["comp", "tech", "rev"]` — these are the **subtask IDs** of the parallel siblings, not external references.
+
+### Rules
+
+- Do not invent additional subtasks. The chain is exactly four.
+- Do not change subtask `id`s — `comp`/`tech`/`rev`/`synth` are referenced by `depends_on` and by downstream prompt logic.
+- `depends_on=["comp", "tech", "rev"]` on the `synth` subtask is what gates QA on the other three. Without it, QA fires before the upstreams complete.
+- Recipients are fixed per subtask. Do not swap MR with Architect, etc.
+- The three parallel subtasks (`comp`, `tech`, `rev`) target three different agent roles, so the dispatcher parallelism limitation (per-role serialization at `core/dispatcher.py:96`) does not apply.
+
+### Example task_overview
+
+`"Validate <slug> candidate via 4-agent diligence: MR competitor scan, Architect tech-risk, PM revenue model, QA go/no-go synthesis."`
+
 ## Output
 
 Respond with **JSON only** — a single top-level object that matches the schema
