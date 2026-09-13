@@ -50,7 +50,8 @@ node_modules/
 out/
 
 # Local Claude state in repo
-.claude/
+.claude/*
+!.claude/rules/
 
 # Smoke test artifacts
 smoke_report*.json
